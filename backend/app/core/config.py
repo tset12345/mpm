@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,https://mpm-fe.vercel.app"
     dart_api_key: str = ""
     supabase_jwt_secret: str = ""
+    enable_scheduler: bool = False
 
     class Config:
         env_file = ".env"

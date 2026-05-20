@@ -13,9 +13,11 @@ from app.services.scheduler import start_scheduler, scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_scheduler()
+    if settings.enable_scheduler:
+        start_scheduler()
     yield
-    scheduler.shutdown()
+    if settings.enable_scheduler:
+        scheduler.shutdown()
 
 
 app = FastAPI(title="MPM API", version="1.0.0", lifespan=lifespan)
