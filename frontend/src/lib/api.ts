@@ -4,10 +4,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
-  const authHeader = session ? { Authorization: `Bearer ${session.access_token}` } : {};
+  const authHeader: Record<string, string> = session
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: { ...authHeader, ...options?.headers },
+    headers: { ...authHeader, ...(options?.headers as Record<string, string> | undefined) },
   });
   if (res.status === 401) {
     window.location.href = "/login";
