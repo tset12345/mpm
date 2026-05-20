@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { createChart, IChartApi, CandlestickSeries } from "lightweight-charts";
+import { createChart, IChartApi } from "lightweight-charts";
 
 interface OHLCVData {
   time: string;
@@ -29,7 +29,7 @@ export default function CandleChart({ data, height = 300 }: CandleChartProps) {
     });
     chartRef.current = chart;
 
-    const series = chart.addSeries(CandlestickSeries, {
+    const series = chart.addCandlestickSeries({
       upColor: "#ef4444",
       downColor: "#3b82f6",
       borderVisible: false,
