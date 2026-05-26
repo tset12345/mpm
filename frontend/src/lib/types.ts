@@ -253,6 +253,7 @@ export interface SectorLeaderStock {
   rank: number;
   stock_code: string;
   stock_name: string;
+  market?: "KOSPI" | "KOSDAQ" | null;
   current_price: number;
   change_rate: number;
   volume: number;

@@ -364,6 +364,11 @@ export default function StocksPage() {
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
                     <span>{s.stock_code}</span>
+                    {s.market && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        s.market === "KOSPI" ? "bg-blue-50 text-blue-600" : "bg-emerald-50 text-emerald-600"
+                      }`}>{s.market}</span>
+                    )}
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
                       s.ma_aligned ? "bg-teal-50 text-teal-600" : "bg-gray-100 text-gray-400"
                     }`}>{s.ma_aligned ? "정배열" : "비정배열"}</span>

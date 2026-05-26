@@ -258,18 +258,21 @@ async def get_sector_leaders(sector: str) -> list[dict]:
     try:
         master_rows = (
             supabase.table("stock_master")
-            .select("stock_code,stock_name")
+            .select("stock_code,stock_name,market")
             .in_("stock_code", valid_codes)
             .execute()
         ).data or []
-        name_map = {r["stock_code"]: r["stock_name"] for r in master_rows}
+        name_map   = {r["stock_code"]: r["stock_name"] for r in master_rows}
+        market_map = {r["stock_code"]: r["market"]     for r in master_rows}
     except Exception as e:
         logger.warning(f"[sector_leader] stock_master 조회 실패: {e}")
-        name_map = {}
+        name_map   = {}
+        market_map = {}
 
     for code, snap in snapshot.items():
         if code in name_map:
             snap["stock_name"] = name_map[code]
+        snap["market"] = market_map.get(code)
 
     # ── 3. OHLCV DB 조회 (MA 계산용) ─────────────────────────────────────────
     start_iso = (date.today() - timedelta(days=90)).isoformat()
