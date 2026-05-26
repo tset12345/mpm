@@ -1,39 +1,35 @@
 "use client";
 import { useState, useEffect } from "react";
-
-const KEY_CODES = "mpm_favorites";
-const KEY_NAMES = "mpm_favorite_names";
+import { api } from "@/lib/api";
 
 export function useFavorites() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoriteNames, setFavoriteNames] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const codes = localStorage.getItem(KEY_CODES);
-    if (codes) setFavorites(JSON.parse(codes));
-    const names = localStorage.getItem(KEY_NAMES);
-    if (names) setFavoriteNames(JSON.parse(names));
+    api.getFavorites()
+      .then((res) => {
+        setFavorites(res.data.map((f) => f.stock_code));
+        setFavoriteNames(Object.fromEntries(res.data.map((f) => [f.stock_code, f.stock_name])));
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
   const toggle = (code: string, name?: string) => {
-    setFavorites((prev) => {
-      const next = prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code];
-      localStorage.setItem(KEY_CODES, JSON.stringify(next));
-      return next;
-    });
-    setFavoriteNames((prev) => {
-      const next = { ...prev };
-      if (prev[code]) {
-        delete next[code];
-      } else if (name) {
-        next[code] = name;
-      }
-      localStorage.setItem(KEY_NAMES, JSON.stringify(next));
-      return next;
-    });
+    if (favorites.includes(code)) {
+      setFavorites((prev) => prev.filter((c) => c !== code));
+      setFavoriteNames((prev) => { const n = { ...prev }; delete n[code]; return n; });
+      api.removeFavorite(code).catch(() => {});
+    } else {
+      setFavorites((prev) => [...prev, code]);
+      if (name) setFavoriteNames((prev) => ({ ...prev, [code]: name }));
+      api.addFavorite(code, name ?? code).catch(() => {});
+    }
   };
 
   const isFavorite = (code: string) => favorites.includes(code);
 
-  return { favorites, favoriteNames, toggle, isFavorite };
+  return { favorites, favoriteNames, toggle, isFavorite, loaded };
 }

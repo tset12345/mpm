@@ -68,6 +68,31 @@ class OHLCVSyncRequest(BaseModel):
     stock_codes: Optional[list[str]] = None
 
 
+class FavoriteBody(BaseModel):
+    stock_code: str
+    stock_name: str
+
+
+@router.get("/favorites")
+def get_favorites():
+    rows = supabase.table("favorites").select("stock_code,stock_name,created_at").order("created_at").execute()
+    return {"status": "success", "data": rows.data or []}
+
+
+@router.post("/favorites")
+def add_favorite(body: FavoriteBody):
+    supabase.table("favorites").upsert(
+        {"stock_code": body.stock_code, "stock_name": body.stock_name}
+    ).execute()
+    return {"status": "success"}
+
+
+@router.delete("/favorites/{stock_code}")
+def remove_favorite(stock_code: str):
+    supabase.table("favorites").delete().eq("stock_code", stock_code).execute()
+    return {"status": "success"}
+
+
 @router.get("/recommend")
 async def get_recommendations():
     try:

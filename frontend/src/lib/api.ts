@@ -118,4 +118,17 @@ export const api = {
   refreshAllSectorLeaders: () =>
     fetchAPI<{ status: string; message: string }>("/api/v1/stocks/sector-leader/refresh", { method: "POST" }),
 
+  getFavorites: () =>
+    fetchAPI<{ status: string; data: { stock_code: string; stock_name: string }[] }>("/api/v1/stocks/favorites"),
+
+  addFavorite: (stock_code: string, stock_name: string) =>
+    fetchAPI<{ status: string }>("/api/v1/stocks/favorites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stock_code, stock_name }),
+    }),
+
+  removeFavorite: (stock_code: string) =>
+    fetchAPI<{ status: string }>(`/api/v1/stocks/favorites/${stock_code}`, { method: "DELETE" }),
+
 };
