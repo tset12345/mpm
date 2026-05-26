@@ -118,7 +118,9 @@ export default function StocksPage() {
     searchParams.get("tab") === "favorites" ? "favorites" :
     searchParams.get("tab") === "sector" ? "sector" : "recommend"
   );
-  const [selectedSector, setSelectedSector] = useState<string | null>(null);
+  const [selectedSector, setSelectedSector] = useState<string | null>(
+    searchParams.get("tab") === "sector" ? (searchParams.get("sector") ?? null) : null
+  );
   const [sectorLeaders, setSectorLeaders] = useState<SectorLeaderStock[]>([]);
   const [sectorUpdatedAt, setSectorUpdatedAt] = useState<string | null>(null);
   const [allSectorLeaders, setAllSectorLeaders] = useState<{ sector: string; leaders: SectorLeaderStock[]; updated_at: string | null }[]>([]);
@@ -139,6 +141,31 @@ export default function StocksPage() {
   const { favorites, toggle, isFavorite } = useFavorites();
   const router = useRouter();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const selectSector = (s: string) => {
+    setSelectedSector(s);
+    setSectorLeaders([]);
+    setSectorUpdatedAt(null);
+    setAllSectorLeaders([]);
+    router.replace(`/stocks?tab=sector&sector=${encodeURIComponent(s)}`);
+  };
+
+  // 뒤로가기로 복귀 시 URL의 섹터 자동 조회
+  useEffect(() => {
+    if (tab !== "sector" || !selectedSector) return;
+    setSectorLoading(true);
+    if (selectedSector === "전체") {
+      api.getAllSectorLeaders()
+        .then((res) => setAllSectorLeaders(res.data ?? []))
+        .catch(() => setAllSectorLeaders([]))
+        .finally(() => setSectorLoading(false));
+    } else {
+      api.getSectorLeader(selectedSector)
+        .then((res) => { setSectorLeaders(res.data ?? []); setSectorUpdatedAt(res.updated_at ?? null); })
+        .catch(() => setSectorLeaders([]))
+        .finally(() => setSectorLoading(false));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshRecommendations = () => {
     if (refreshing) return;
@@ -525,10 +552,7 @@ export default function StocksPage() {
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
                   onClick={() => {
-                    setSelectedSector("전체");
-                    setSectorLeaders([]);
-                    setSectorUpdatedAt(null);
-                    setAllSectorLeaders([]);
+                    selectSector("전체");
                     setSectorLoading(true);
                     api.getAllSectorLeaders()
                       .then((res) => setAllSectorLeaders(res.data ?? []))
@@ -547,10 +571,7 @@ export default function StocksPage() {
                   <button
                     key={s}
                     onClick={() => {
-                      setSelectedSector(s);
-                      setSectorLeaders([]);
-                      setSectorUpdatedAt(null);
-                      setAllSectorLeaders([]);
+                      selectSector(s);
                       setSectorLoading(true);
                       api.getSectorLeader(s)
                         .then((res) => { setSectorLeaders(res.data ?? []); setSectorUpdatedAt(res.updated_at ?? null); })
