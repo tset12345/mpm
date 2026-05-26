@@ -105,4 +105,9 @@ export const api = {
       `/api/v1/analysis/${code}?strategy_type=${strategyType}`
     ),
 
+  getSectorLeader: (sector: string) =>
+    fetchAPI<{ status: string; sector: string; data: import("./types").SectorLeaderStock[] }>(
+      `/api/v1/stocks/sector-leader?sector=${encodeURIComponent(sector)}`
+    ),
+
 };

@@ -249,3 +249,26 @@ export interface StockMaster {
   market: "KOSPI" | "KOSDAQ";
 }
 
+export interface SectorLeaderStock {
+  rank: number;
+  stock_code: string;
+  stock_name: string;
+  current_price: number;
+  change_rate: number;
+  volume: number;
+  market_cap: number;
+  transaction_amount: number;
+  score: number;
+  score_detail: {
+    amount: number;
+    rate: number;
+    ma_aligned: number;
+    mktcap: number;
+  };
+  tags: string[];
+  ma5: number | null;
+  ma20: number | null;
+  ma60: number | null;
+  ma_aligned: boolean;
+}
+

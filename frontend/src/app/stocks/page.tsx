@@ -2,9 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { StockSummary, StockMaster } from "@/lib/types";
+import { StockSummary, StockMaster, SectorLeaderStock } from "@/lib/types";
 import { useFavorites } from "@/hooks/useFavorites";
-import { RefreshCw, Search, Star, X } from "lucide-react";
+import { RefreshCw, Search, Star, X, TrendingUp } from "lucide-react";
 
 function ScoreBadge({ tech, fund, total }: { tech?: number; fund?: number; total?: number }) {
   const display = total ?? tech;
@@ -104,11 +104,23 @@ function ConsecutiveBadge({ days }: { days: number | undefined }) {
   );
 }
 
+const SECTORS = [
+  "반도체(AI/HBM)", "온디바이스 AI", "2차전지 소재·장비", "로봇·스마트팩토리",
+  "우주항공·방산", "자율주행·전장부품", "바이오시밀러·신약", "양자컴퓨터·원자력(SMR)",
+  "자동차 제조", "조선·해양플랜트", "철강·비철금속", "화학·정유",
+  "디스플레이·OLED", "기계·건설장비", "인터넷·엔터테인먼트", "게임·콘텐츠",
+  "금융(은행·보험·증권)", "음식료", "화장품·미용기기", "신재생 에너지",
+];
+
 export default function StocksPage() {
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<"recommend" | "favorites">(
-    searchParams.get("tab") === "favorites" ? "favorites" : "recommend"
+  const [tab, setTab] = useState<"recommend" | "favorites" | "sector">(
+    searchParams.get("tab") === "favorites" ? "favorites" :
+    searchParams.get("tab") === "sector" ? "sector" : "recommend"
   );
+  const [selectedSector, setSelectedSector] = useState<string | null>(null);
+  const [sectorLeaders, setSectorLeaders] = useState<SectorLeaderStock[]>([]);
+  const [sectorLoading, setSectorLoading] = useState(false);
   const [stocks, setStocks] = useState<StockSummary[]>([]);
   const [dataDate, setDataDate] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
@@ -311,6 +323,82 @@ export default function StocksPage() {
     );
   }
 
+  const RANK_ICON: Record<number, string> = { 1: "👑", 2: "🥈", 3: "🥉" };
+  const RANK_LABEL: Record<number, string> = { 1: "1등주", 2: "2등주", 3: "3등주" };
+
+  function SectorLeaderTable({ leaders, onRowClick }: { leaders: SectorLeaderStock[]; onRowClick: (code: string) => void }) {
+    return (
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+            <tr>
+              <th className="px-4 py-3 text-left w-56">종목명</th>
+              <th className="px-4 py-3 text-right">현재가</th>
+              <th className="px-4 py-3 text-right">등락률</th>
+              <th className="px-4 py-3 text-right">거래대금(억)</th>
+              <th className="px-4 py-3 text-right">시총(억)</th>
+              <th className="px-4 py-3 text-right">점수</th>
+              <th className="px-4 py-3 text-left">점수 구성</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {leaders.map((s) => (
+              <tr
+                key={s.stock_code}
+                className="hover:bg-gray-50 cursor-pointer"
+                onClick={() => onRowClick(s.stock_code)}
+              >
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">{RANK_ICON[s.rank]}</span>
+                    <span className="font-medium">{s.stock_name}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      s.rank === 1 ? "bg-amber-100 text-amber-700" :
+                      s.rank === 2 ? "bg-slate-100 text-slate-600" :
+                      "bg-orange-50 text-orange-600"
+                    }`}>{RANK_LABEL[s.rank]}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
+                    <span>{s.stock_code}</span>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                      s.ma_aligned ? "bg-teal-50 text-teal-600" : "bg-gray-100 text-gray-400"
+                    }`}>{s.ma_aligned ? "정배열" : "비정배열"}</span>
+                    {(s.tags ?? []).filter((t) => t !== "정배열").map((tag) => (
+                      <span key={tag} className="bg-blue-50 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{tag}</span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-mono">{s.current_price > 0 ? s.current_price.toLocaleString() : "-"}</td>
+                <td className={`px-4 py-3 text-right font-mono ${s.change_rate >= 0 ? "text-red-500" : "text-blue-500"}`}>
+                  {`${s.change_rate >= 0 ? "+" : ""}${s.change_rate.toFixed(2)}%`}
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-gray-600">
+                  {s.transaction_amount > 0 ? Math.round(s.transaction_amount / 1e8).toLocaleString() : "-"}
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-gray-600">{s.market_cap > 0 ? s.market_cap.toLocaleString() : "-"}</td>
+                <td className="px-4 py-3 text-right">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded font-mono ${
+                    s.score >= 75 ? "bg-red-100 text-red-700" :
+                    s.score >= 50 ? "bg-orange-100 text-orange-700" :
+                    "bg-yellow-100 text-yellow-700"
+                  }`}>{s.score}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1 flex-wrap text-[10px]">
+                    <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="거래대금">대금 {s.score_detail.amount}</span>
+                    <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="상승률">상승 {s.score_detail.rate}</span>
+                    <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="정배열">MA {s.score_detail.ma_aligned}</span>
+                    <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="시가총액">시총 {s.score_detail.mktcap}</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex items-baseline justify-between mb-4">
@@ -398,6 +486,13 @@ export default function StocksPage() {
               오늘의 추천
             </button>
             <button
+              onClick={() => setTab("sector")}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded text-sm font-medium ${tab === "sector" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700"}`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              섹터 주도주
+            </button>
+            <button
               onClick={() => setTab("favorites")}
               className={`px-4 py-2 rounded text-sm font-medium ${tab === "favorites" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700"}`}
             >
@@ -415,7 +510,52 @@ export default function StocksPage() {
               </button>
             )}
           </div>
-          {tab === "favorites" && favoritesLoading ? (
+          {tab === "sector" ? (
+            <div>
+              <p className="text-xs text-gray-500 mb-3">섹터를 선택하면 실시간 시세 데이터로 주도주를 산출합니다.</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {SECTORS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      setSelectedSector(s);
+                      setSectorLeaders([]);
+                      setSectorLoading(true);
+                      api.getSectorLeader(s)
+                        .then((res) => setSectorLeaders(res.data ?? []))
+                        .catch(() => setSectorLeaders([]))
+                        .finally(() => setSectorLoading(false));
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                      selectedSector === s
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+              {sectorLoading && (
+                <div className="text-center py-16 text-gray-400">
+                  <div className="text-2xl mb-2">📊</div>
+                  <div className="text-sm">실시간 데이터를 분석하고 있습니다...</div>
+                </div>
+              )}
+              {!sectorLoading && sectorLeaders.length > 0 && (
+                <SectorLeaderTable leaders={sectorLeaders} onRowClick={(code) => router.push(`/stocks/${code}`)} />
+              )}
+              {!sectorLoading && sectorLeaders.length === 0 && selectedSector && !sectorLoading && (
+                <div className="text-center py-12 text-gray-400 text-sm">분석 결과가 없습니다.</div>
+              )}
+              {!selectedSector && (
+                <div className="text-center py-16 text-gray-300">
+                  <TrendingUp className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <div className="text-sm">위에서 섹터를 선택하세요</div>
+                </div>
+              )}
+            </div>
+          ) : tab === "favorites" && favoritesLoading ? (
             <div className="text-center py-20 text-gray-400">불러오는 중...</div>
           ) : tab !== "favorites" && loading ? (
             <div className="text-center py-20 text-gray-400">불러오는 중...</div>

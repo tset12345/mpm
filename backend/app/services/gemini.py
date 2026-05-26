@@ -36,6 +36,33 @@ _PROMPT_TEMPLATE = """\
 """
 
 
+async def call_gemini_text(prompt: str) -> str:
+    """Gemini에 프롬프트를 보내고 텍스트 응답을 반환한다."""
+    global _last_call_time
+    import time
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < _MIN_INTERVAL:
+        await asyncio.sleep(_MIN_INTERVAL - elapsed)
+
+    for attempt in range(3):
+        _last_call_time = time.monotonic()
+        try:
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            return response.text.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "ResourceExhausted" in err or "quota" in err.lower():
+                wait = 15 * (attempt + 1)
+                logger.warning(f"Gemini RPM 한도 초과 — {wait}초 대기 후 재시도 ({attempt + 1}/3)")
+                await asyncio.sleep(wait)
+            elif attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise
+
+    raise RuntimeError("Gemini API 재시도 횟수 초과")
+
+
 async def summarize_report(text: str) -> dict:
     global _last_call_time
 

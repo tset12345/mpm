@@ -103,6 +103,119 @@
 
 ---
 
+### GET /api/v1/stocks/recommend/prices
+
+추천 종목의 현재가·등락률만 KIS API에서 실시간 조회합니다. 프론트엔드에서 30초마다 폴링해 화면을 갱신할 때 사용합니다.
+
+**Query Parameters**: 없음
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "stock_code": "005930",
+      "current_price": 74200,
+      "change_rate": 2.35
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `data[].stock_code` | string | 종목 코드 |
+| `data[].current_price` | number \| null | 현재가 (원) |
+| `data[].change_rate` | number \| null | 전일 대비 등락률 (%) |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 |
+
+---
+
+### GET /api/v1/stocks/sector-leader
+
+지정한 섹터의 주도주 상위 3개를 실시간 데이터로 채점해 반환합니다.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|------|------|
+| `sector` | string | 예 | 섹터명 (예: `반도체(AI/HBM)`) |
+
+**지원 섹터 (20개)**
+
+반도체(AI/HBM), 온디바이스 AI, 2차전지 소재·장비, 로봇·스마트팩토리, 우주항공·방산, 자율주행·전장부품, 바이오시밀러·신약, 양자컴퓨터·원자력(SMR), 자동차 제조, 조선·해양플랜트, 철강·비철금속, 화학·정유, 디스플레이·OLED, 기계·건설장비, 인터넷·엔터테인먼트, 게임·콘텐츠, 금융(은행·보험·증권), 음식료, 화장품·미용기기, 신재생 에너지
+
+**처리 로직**
+
+1. 섹터 내 종목 코드 조회 (하드코딩 매핑)
+2. KIS API `get_stock_price()` 병렬 호출 → 현재가·등락률·거래대금·시가총액·거래량 수집
+3. `stock_master` DB에서 종목명 일괄 조회
+4. `stock_ohlcv` DB에서 최근 90일 종가 조회 → MA5 / MA20 / MA60 계산
+5. 시가총액 500억 미만 Hard Filter 제외
+6. 100점 스코어링: 거래대금(30) + 상승률(30) + 정배열(20) + 시총 통과(20)
+7. 점수 내림차순 정렬 → 상위 3개 반환 (rank 1–3)
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "sector": "반도체(AI/HBM)",
+  "data": [
+    {
+      "rank": 1,
+      "stock_code": "000660",
+      "stock_name": "SK하이닉스",
+      "current_price": 198500,
+      "change_rate": 3.12,
+      "volume": 5820100,
+      "market_cap": 1443000,
+      "transaction_amount": 115490000000,
+      "score": 80,
+      "score_detail": {
+        "amount": 30,
+        "rate": 30,
+        "ma_aligned": 20,
+        "mktcap": 20
+      },
+      "tags": ["거래대금", "상승률", "정배열"],
+      "ma5": 195000,
+      "ma20": 188000,
+      "ma60": 175000,
+      "ma_aligned": true
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `data[].rank` | integer | 순위 (1–3) |
+| `data[].stock_code` | string | 종목 코드 |
+| `data[].stock_name` | string | 종목명 (`stock_master` DB 기준) |
+| `data[].current_price` | number | 현재가 (원) |
+| `data[].change_rate` | number | 등락률 (%) |
+| `data[].market_cap` | number | 시가총액 (억원) |
+| `data[].transaction_amount` | number | 누적 거래대금 (원) |
+| `data[].score` | integer | 종합 점수 (0–100) |
+| `data[].score_detail` | object | 항목별 점수 (amount / rate / ma_aligned / mktcap) |
+| `data[].tags` | string[] | 강점 태그 (거래대금 / 상승률 / 정배열) |
+| `data[].ma5` / `ma20` / `ma60` | number \| null | 이동평균 (DB OHLCV 90일 기준) |
+| `data[].ma_aligned` | boolean | 정배열 여부 (5MA > 20MA > 60MA) |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 |
+| 400 | 지원하지 않는 섹터명 |
+| 500 | KIS API 또는 DB 오류 |
+
+---
+
 ### GET /api/v1/stocks/history
 
 추천 종목 히스토리를 기간별로 조회합니다.

@@ -12,6 +12,7 @@ from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
+from app.services.sector_leader import get_sector_leaders, SECTOR_STOCKS
 
 logger = logging.getLogger(__name__)
 
@@ -420,6 +421,14 @@ async def get_stock_detail(stock_code: str):
             },
         },
     }
+
+
+@router.get("/sector-leader")
+async def get_sector_leader(sector: str = Query(...)):
+    if sector not in SECTOR_STOCKS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 섹터입니다: {sector}")
+    leaders = await get_sector_leaders(sector)
+    return {"status": "success", "sector": sector, "data": leaders}
 
 
 @router.get("/health")
