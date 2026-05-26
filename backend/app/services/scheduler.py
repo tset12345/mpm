@@ -23,6 +23,15 @@ async def run_daily_sync():
         logger.error(f"일일 동기화 실패: {e}")
 
 
+async def run_sector_leader_refresh():
+    """장 시작 직후 전체 섹터 주도주 DB 갱신 (1일 1회, 09:05 KST)."""
+    from app.services.sector_leader import refresh_all_sectors
+    try:
+        await refresh_all_sectors()
+    except Exception as e:
+        logger.error(f"섹터 주도주 갱신 실패: {e}")
+
+
 async def startup_sync_if_needed():
     """서버 시작 시 오늘 추천 데이터가 없으면 즉시 동기화."""
     from app.services.supabase_client import supabase
@@ -60,5 +69,12 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=3600,
         )
+    scheduler.add_job(
+        run_sector_leader_refresh,
+        CronTrigger(hour=9, minute=5, day_of_week="mon-fri", timezone="Asia/Seoul"),
+        id="sector_leader_refresh",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
-    logger.info("스케줄러 시작 — 08:50 / 11:00 / 14:00 / 16:10 (월~금 KST, 1일 4회) | 시작 체크 활성")
+    logger.info("스케줄러 시작 — 08:50 / 11:00 / 14:00 / 16:10 추천 | 09:05 섹터주도주 (월~금 KST)")

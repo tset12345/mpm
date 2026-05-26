@@ -14,7 +14,7 @@ DB stock_ohlcv(이동평균 계산)를 이용하여
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
@@ -339,3 +339,79 @@ async def get_sector_leaders(sector: str) -> list[dict]:
     for i, s in enumerate(ranked, start=1):
         s["rank"] = i
     return ranked
+
+
+# ── 캐시 레이어 ───────────────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _save_to_cache(sector: str, leaders: list[dict]) -> str:
+    now = _now_iso()
+    try:
+        supabase.table("sector_leaders").upsert({
+            "sector": sector,
+            "data": leaders,
+            "updated_at": now,
+        }).execute()
+    except Exception as e:
+        logger.warning(f"[sector_leader] 캐시 저장 실패 {sector}: {e}")
+    return now
+
+
+async def get_sector_leaders_cached(sector: str, force: bool = False) -> tuple[list[dict], str | None]:
+    """DB 캐시 우선 반환. force=True 이면 KIS 재조회 후 저장."""
+    if not force:
+        try:
+            row = (
+                supabase.table("sector_leaders")
+                .select("data,updated_at")
+                .eq("sector", sector)
+                .limit(1)
+                .execute()
+            ).data
+            if row:
+                return row[0]["data"], row[0]["updated_at"]
+        except Exception as e:
+            logger.warning(f"[sector_leader] 캐시 조회 실패 {sector}: {e}")
+
+    leaders = await get_sector_leaders(sector)
+    updated_at = _save_to_cache(sector, leaders)
+    return leaders, updated_at
+
+
+async def get_all_sectors_cached() -> list[dict]:
+    """모든 섹터의 캐시 데이터를 한 번에 반환 (DB 단일 조회)."""
+    try:
+        rows = (
+            supabase.table("sector_leaders")
+            .select("sector,data,updated_at")
+            .execute()
+        ).data or []
+        row_map = {r["sector"]: r for r in rows}
+    except Exception as e:
+        logger.warning(f"[sector_leader] 전체 캐시 조회 실패: {e}")
+        row_map = {}
+
+    return [
+        {
+            "sector": s,
+            "leaders": row_map[s]["data"] if s in row_map else [],
+            "updated_at": row_map[s]["updated_at"] if s in row_map else None,
+        }
+        for s in SECTOR_STOCKS
+    ]
+
+
+async def refresh_all_sectors() -> None:
+    """모든 섹터를 순차 갱신하여 DB에 저장 (스케줄러 전용)."""
+    logger.info("[sector_leader] 전체 섹터 갱신 시작")
+    for sector in SECTOR_STOCKS:
+        try:
+            leaders = await get_sector_leaders(sector)
+            _save_to_cache(sector, leaders)
+            logger.info(f"[sector_leader] 갱신 완료: {sector}")
+        except Exception as e:
+            logger.error(f"[sector_leader] 갱신 실패 {sector}: {e}")
+    logger.info("[sector_leader] 전체 섹터 갱신 완료")

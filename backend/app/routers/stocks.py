@@ -12,7 +12,10 @@ from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
-from app.services.sector_leader import get_sector_leaders, SECTOR_STOCKS
+from app.services.sector_leader import (
+    get_sector_leaders, SECTOR_STOCKS,
+    get_sector_leaders_cached, get_all_sectors_cached, refresh_all_sectors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -423,12 +426,26 @@ async def get_stock_detail(stock_code: str):
     }
 
 
+@router.get("/sector-leader/all")
+async def get_all_sector_leaders():
+    """모든 섹터의 캐시된 주도주 데이터를 한 번에 반환."""
+    data = await get_all_sectors_cached()
+    return {"status": "success", "data": data}
+
+
+@router.post("/sector-leader/refresh")
+async def refresh_sector_leaders():
+    """모든 섹터를 KIS API에서 재조회해 DB에 저장 (스케줄러 또는 수동 갱신)."""
+    await refresh_all_sectors()
+    return {"status": "success", "message": f"{len(SECTOR_STOCKS)}개 섹터 갱신 완료"}
+
+
 @router.get("/sector-leader")
-async def get_sector_leader(sector: str = Query(...)):
+async def get_sector_leader(sector: str = Query(...), force: bool = Query(False)):
     if sector not in SECTOR_STOCKS:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 섹터입니다: {sector}")
-    leaders = await get_sector_leaders(sector)
-    return {"status": "success", "sector": sector, "data": leaders}
+    leaders, updated_at = await get_sector_leaders_cached(sector, force=force)
+    return {"status": "success", "sector": sector, "data": leaders, "updated_at": updated_at}
 
 
 @router.get("/health")

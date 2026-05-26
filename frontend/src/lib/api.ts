@@ -105,9 +105,17 @@ export const api = {
       `/api/v1/analysis/${code}?strategy_type=${strategyType}`
     ),
 
-  getSectorLeader: (sector: string) =>
-    fetchAPI<{ status: string; sector: string; data: import("./types").SectorLeaderStock[] }>(
-      `/api/v1/stocks/sector-leader?sector=${encodeURIComponent(sector)}`
+  getSectorLeader: (sector: string, force = false) =>
+    fetchAPI<{ status: string; sector: string; data: import("./types").SectorLeaderStock[]; updated_at: string | null }>(
+      `/api/v1/stocks/sector-leader?sector=${encodeURIComponent(sector)}${force ? "&force=true" : ""}`
     ),
+
+  getAllSectorLeaders: () =>
+    fetchAPI<{ status: string; data: { sector: string; leaders: import("./types").SectorLeaderStock[]; updated_at: string | null }[] }>(
+      "/api/v1/stocks/sector-leader/all"
+    ),
+
+  refreshAllSectorLeaders: () =>
+    fetchAPI<{ status: string; message: string }>("/api/v1/stocks/sector-leader/refresh", { method: "POST" }),
 
 };

@@ -120,7 +120,11 @@ export default function StocksPage() {
   );
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [sectorLeaders, setSectorLeaders] = useState<SectorLeaderStock[]>([]);
+  const [sectorUpdatedAt, setSectorUpdatedAt] = useState<string | null>(null);
+  const [allSectorLeaders, setAllSectorLeaders] = useState<{ sector: string; leaders: SectorLeaderStock[]; updated_at: string | null }[]>([]);
+  const [allSectorProgress, setAllSectorProgress] = useState(0);
   const [sectorLoading, setSectorLoading] = useState(false);
+  const [sectorRefreshing, setSectorRefreshing] = useState(false);
   const [stocks, setStocks] = useState<StockSummary[]>([]);
   const [dataDate, setDataDate] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
@@ -512,17 +516,39 @@ export default function StocksPage() {
           </div>
           {tab === "sector" ? (
             <div>
-              <p className="text-xs text-gray-500 mb-3">섹터를 선택하면 실시간 시세 데이터로 주도주를 산출합니다.</p>
+              <p className="text-xs text-gray-500 mb-3">섹터를 선택하면 캐시된 주도주 데이터를 표시합니다. 매일 09:05 자동 갱신됩니다.</p>
               <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={() => {
+                    setSelectedSector("전체");
+                    setSectorLeaders([]);
+                    setSectorUpdatedAt(null);
+                    setAllSectorLeaders([]);
+                    setSectorLoading(true);
+                    api.getAllSectorLeaders()
+                      .then((res) => setAllSectorLeaders(res.data ?? []))
+                      .catch(() => setAllSectorLeaders([]))
+                      .finally(() => setSectorLoading(false));
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                    selectedSector === "전체"
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:border-indigo-400"
+                  }`}
+                >
+                  전체
+                </button>
                 {SECTORS.map((s) => (
                   <button
                     key={s}
                     onClick={() => {
                       setSelectedSector(s);
                       setSectorLeaders([]);
+                      setSectorUpdatedAt(null);
+                      setAllSectorLeaders([]);
                       setSectorLoading(true);
                       api.getSectorLeader(s)
-                        .then((res) => setSectorLeaders(res.data ?? []))
+                        .then((res) => { setSectorLeaders(res.data ?? []); setSectorUpdatedAt(res.updated_at ?? null); })
                         .catch(() => setSectorLeaders([]))
                         .finally(() => setSectorLoading(false));
                     }}
@@ -536,17 +562,84 @@ export default function StocksPage() {
                   </button>
                 ))}
               </div>
+
+              {/* 새로 불러오기 버튼 + updated_at */}
+              {selectedSector && !sectorLoading && (
+                <div className="flex items-center gap-3 mb-4">
+                  <button
+                    onClick={() => {
+                      if (sectorRefreshing) return;
+                      setSectorRefreshing(true);
+                      if (selectedSector === "전체") {
+                        setSectorLoading(true);
+                        setAllSectorLeaders([]);
+                        setAllSectorProgress(0);
+                        let completed = 0;
+                        const results: { sector: string; leaders: SectorLeaderStock[]; updated_at: string | null }[] =
+                          SECTORS.map((s) => ({ sector: s, leaders: [], updated_at: null }));
+                        Promise.allSettled(
+                          SECTORS.map((s, i) =>
+                            api.getSectorLeader(s, true)
+                              .then((res) => { results[i] = { sector: s, leaders: res.data ?? [], updated_at: res.updated_at ?? null }; })
+                              .catch(() => {})
+                              .finally(() => { completed++; setAllSectorProgress(completed); })
+                          )
+                        ).then(() => { setAllSectorLeaders([...results]); setSectorLoading(false); setSectorRefreshing(false); });
+                      } else {
+                        api.getSectorLeader(selectedSector, true)
+                          .then((res) => { setSectorLeaders(res.data ?? []); setSectorUpdatedAt(res.updated_at ?? null); })
+                          .catch(() => {})
+                          .finally(() => setSectorRefreshing(false));
+                      }
+                    }}
+                    disabled={sectorRefreshing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${sectorRefreshing ? "animate-spin" : ""}`} />
+                    새로 불러오기
+                  </button>
+                  {selectedSector !== "전체" && sectorUpdatedAt && (
+                    <span className="text-xs text-gray-400">기준: {formatGeneratedAt(sectorUpdatedAt)}</span>
+                  )}
+                </div>
+              )}
+
               {sectorLoading && (
                 <div className="text-center py-16 text-gray-400">
                   <div className="text-2xl mb-2">📊</div>
-                  <div className="text-sm">실시간 데이터를 분석하고 있습니다...</div>
+                  <div className="text-sm">
+                    {selectedSector === "전체" && sectorRefreshing
+                      ? `갱신 중... ${allSectorProgress} / ${SECTORS.length}`
+                      : "데이터를 불러오는 중..."}
+                  </div>
                 </div>
               )}
-              {!sectorLoading && sectorLeaders.length > 0 && (
+              {!sectorLoading && selectedSector === "전체" && allSectorLeaders.length > 0 && (
+                <div className="space-y-8">
+                  {allSectorLeaders.map(({ sector, leaders, updated_at }) => (
+                    <div key={sector}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                          <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+                          {sector}
+                        </h3>
+                        {updated_at && (
+                          <span className="text-[10px] text-gray-400">{formatGeneratedAt(updated_at)}</span>
+                        )}
+                      </div>
+                      {leaders.length > 0
+                        ? <SectorLeaderTable leaders={leaders} onRowClick={(code) => router.push(`/stocks/${code}`)} />
+                        : <div className="text-xs text-gray-400 py-4 text-center border rounded-lg">캐시 없음 — 새로 불러오기를 눌러주세요</div>
+                      }
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!sectorLoading && selectedSector !== "전체" && sectorLeaders.length > 0 && (
                 <SectorLeaderTable leaders={sectorLeaders} onRowClick={(code) => router.push(`/stocks/${code}`)} />
               )}
-              {!sectorLoading && sectorLeaders.length === 0 && selectedSector && !sectorLoading && (
-                <div className="text-center py-12 text-gray-400 text-sm">분석 결과가 없습니다.</div>
+              {!sectorLoading && selectedSector !== "전체" && selectedSector && sectorLeaders.length === 0 && (
+                <div className="text-center py-12 text-gray-400 text-sm">캐시 없음 — 새로 불러오기를 눌러주세요</div>
               )}
               {!selectedSector && (
                 <div className="text-center py-16 text-gray-300">
