@@ -138,27 +138,33 @@
 
 ### GET /api/v1/stocks/sector-leader
 
-지정한 섹터의 주도주 상위 3개를 실시간 데이터로 채점해 반환합니다.
+지정한 섹터의 주도주 상위 3개를 반환합니다. 기본적으로 `sector_leaders` 테이블 캐시를 우선 조회하며, `force=true` 시 KIS API를 재조회하고 캐시를 갱신합니다.
 
 **Query Parameters**
 
-| 파라미터 | 타입 | 필수 | 설명 |
-|----------|------|------|------|
-| `sector` | string | 예 | 섹터명 (예: `반도체(AI/HBM)`) |
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `sector` | string | 예 | — | 섹터명 (예: `반도체(AI/HBM)`) |
+| `force` | boolean | 아니오 | `false` | `true` 시 KIS API 재조회 후 캐시 갱신 |
 
 **지원 섹터 (20개)**
 
 반도체(AI/HBM), 온디바이스 AI, 2차전지 소재·장비, 로봇·스마트팩토리, 우주항공·방산, 자율주행·전장부품, 바이오시밀러·신약, 양자컴퓨터·원자력(SMR), 자동차 제조, 조선·해양플랜트, 철강·비철금속, 화학·정유, 디스플레이·OLED, 기계·건설장비, 인터넷·엔터테인먼트, 게임·콘텐츠, 금융(은행·보험·증권), 음식료, 화장품·미용기기, 신재생 에너지
 
-**처리 로직**
+**처리 로직 (force=false)**
+
+1. `sector_leaders` 테이블에서 해당 섹터 캐시 조회
+2. 캐시 있으면 즉시 반환 / 없으면 빈 배열 반환 (자동 조회 없음)
+
+**처리 로직 (force=true)**
 
 1. 섹터 내 종목 코드 조회 (하드코딩 매핑)
-2. KIS API `get_stock_price()` 병렬 호출 → 현재가·등락률·거래대금·시가총액·거래량 수집
+2. KIS API `get_stock_price()` 호출 — 글로벌 세마포어(5) 적용으로 동시 호출 상한 제어
 3. `stock_master` DB에서 종목명 일괄 조회
-4. `stock_ohlcv` DB에서 최근 90일 종가 조회 → MA5 / MA20 / MA60 계산
+4. `stock_ohlcv` DB에서 최근 90일 종가 → MA5 / MA20 / MA60 계산
 5. 시가총액 500억 미만 Hard Filter 제외
 6. 100점 스코어링: 거래대금(30) + 상승률(30) + 정배열(20) + 시총 통과(20)
-7. 점수 내림차순 정렬 → 상위 3개 반환 (rank 1–3)
+7. 상위 3개를 `sector_leaders` 테이블에 upsert 후 반환
 
 **응답 예시**
 
@@ -166,6 +172,7 @@
 {
   "status": "success",
   "sector": "반도체(AI/HBM)",
+  "updated_at": "2026-05-26T09:05:12.000Z",
   "data": [
     {
       "rank": 1,
@@ -177,12 +184,7 @@
       "market_cap": 1443000,
       "transaction_amount": 115490000000,
       "score": 80,
-      "score_detail": {
-        "amount": 30,
-        "rate": 30,
-        "ma_aligned": 20,
-        "mktcap": 20
-      },
+      "score_detail": { "amount": 30, "rate": 30, "ma_aligned": 20, "mktcap": 20 },
       "tags": ["거래대금", "상승률", "정배열"],
       "ma5": 195000,
       "ma20": 188000,
@@ -195,6 +197,7 @@
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
+| `updated_at` | string \| null | 캐시 최종 갱신 시각 (캐시 없으면 null) |
 | `data[].rank` | integer | 순위 (1–3) |
 | `data[].stock_code` | string | 종목 코드 |
 | `data[].stock_name` | string | 종목명 (`stock_master` DB 기준) |
@@ -210,9 +213,72 @@
 
 | 상태코드 | 의미 |
 |----------|------|
-| 200 | 정상 |
+| 200 | 정상 (캐시 없어도 200, `data: []`) |
 | 400 | 지원하지 않는 섹터명 |
 | 500 | KIS API 또는 DB 오류 |
+
+---
+
+### GET /api/v1/stocks/sector-leader/all
+
+전체 20개 섹터의 캐시 데이터를 `sector_leaders` 테이블에서 단일 쿼리로 반환합니다. 프론트엔드 "전체" 탭에서 사용합니다.
+
+**Query Parameters**: 없음
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "sector": "반도체(AI/HBM)",
+      "leaders": [ { "rank": 1, "stock_code": "000660", ... } ],
+      "updated_at": "2026-05-26T09:05:12.000Z"
+    },
+    {
+      "sector": "온디바이스 AI",
+      "leaders": [],
+      "updated_at": null
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `data[].sector` | string | 섹터명 |
+| `data[].leaders` | array | 해당 섹터 주도주 배열 (캐시 없으면 `[]`) |
+| `data[].updated_at` | string \| null | 캐시 최종 갱신 시각 |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 |
+
+---
+
+### POST /api/v1/stocks/sector-leader/refresh
+
+전체 20개 섹터를 KIS API에서 순차적으로 재조회하여 `sector_leaders` 테이블을 갱신합니다. 스케줄러(09:05 KST)가 자동 호출하며, 수동으로도 실행 가능합니다.
+
+**Request Body**: 없음
+
+**처리 로직**
+
+- 20개 섹터를 순차 처리 (한 섹터씩 KIS API 호출 → DB upsert)
+- 글로벌 세마포어(5) 적용으로 KIS API 과부하 방지
+- 개별 섹터 실패 시 로그 기록 후 다음 섹터 계속 진행
+
+**응답 예시**
+
+```json
+{ "status": "success", "message": "20개 섹터 갱신 완료" }
+```
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 완료 |
+| 500 | 전체 실패 |
 
 ---
 
