@@ -441,11 +441,14 @@ export default function StockDetailPage({ params }: { params: { code: string } }
   const { code } = params;
   const searchParams = useSearchParams();
   const from = searchParams.get("from");
+  const fromSector = searchParams.get("sector");
   const backHref  = from === "portfolio" ? "/portfolio"
                   : from === "favorites" ? "/stocks?tab=favorites"
+                  : from === "sector" && fromSector ? `/stocks?tab=sector&sector=${encodeURIComponent(fromSector)}`
                   : "/stocks";
   const backLabel = from === "portfolio" ? "← 포트폴리오"
                   : from === "favorites" ? "← 즐겨찾기"
+                  : from === "sector" && fromSector ? `← ${fromSector}`
                   : "← 목록으로";
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [loading, setLoading] = useState(true);

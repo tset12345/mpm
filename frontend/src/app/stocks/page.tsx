@@ -654,7 +654,7 @@ export default function StocksPage() {
                         )}
                       </div>
                       {leaders.length > 0
-                        ? <SectorLeaderTable leaders={leaders} onRowClick={(code) => router.push(`/stocks/${code}`)} />
+                        ? <SectorLeaderTable leaders={leaders} onRowClick={(code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(sector)}`)} />
                         : <div className="text-xs text-gray-400 py-4 text-center border rounded-lg">캐시 없음 — 새로 불러오기를 눌러주세요</div>
                       }
                     </div>
@@ -662,7 +662,7 @@ export default function StocksPage() {
                 </div>
               )}
               {!sectorLoading && selectedSector !== "전체" && sectorLeaders.length > 0 && (
-                <SectorLeaderTable leaders={sectorLeaders} onRowClick={(code) => router.push(`/stocks/${code}`)} />
+                <SectorLeaderTable leaders={sectorLeaders} onRowClick={(code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(selectedSector ?? "")}`)} />
               )}
               {!sectorLoading && selectedSector !== "전체" && selectedSector && sectorLeaders.length === 0 && (
                 <div className="text-center py-12 text-gray-400 text-sm">캐시 없음 — 새로 불러오기를 눌러주세요</div>
