@@ -1,16 +1,15 @@
-import asyncio
 import hashlib
 import json
 import logging
 from datetime import date, datetime
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-genai.configure(api_key=settings.gemini_api_key)
-_model = genai.GenerativeModel("gemini-2.5-flash-lite")
+_client = genai.Client(api_key=settings.gemini_api_key)
+_MODEL = "gemini-2.5-flash-lite"
 
 
 def compute_holdings_hash(holdings: list[dict]) -> str:
@@ -193,7 +192,7 @@ async def run_analysis(holdings: list[dict], profile_name: str, analysis_type: s
         prompt = _build_prompt_dividend(holdings, profile_name)
     else:
         prompt = _build_prompt_quant(holdings, profile_name)
-    response = await asyncio.to_thread(_model.generate_content, prompt)
+    response = await _client.aio.models.generate_content(model=_MODEL, contents=prompt)
     return response.text.strip()
 
 

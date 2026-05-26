@@ -2,13 +2,13 @@ import asyncio
 import json
 import logging
 
-import google.generativeai as genai
+from google import genai
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-genai.configure(api_key=settings.gemini_api_key)
-model = genai.GenerativeModel("gemini-2.5-flash-lite")
+_client = genai.Client(api_key=settings.gemini_api_key)
+_MODEL = "gemini-2.5-flash-lite"
 
 # Free-tier: ~15 RPM → enforce a minimum interval between calls
 _MIN_INTERVAL = 5.0  # seconds between consecutive Gemini requests
@@ -47,7 +47,10 @@ async def call_gemini_text(prompt: str) -> str:
     for attempt in range(3):
         _last_call_time = time.monotonic()
         try:
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await _client.aio.models.generate_content(
+                model=_MODEL,
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception as e:
             err = str(e)
@@ -66,7 +69,6 @@ async def call_gemini_text(prompt: str) -> str:
 async def summarize_report(text: str) -> dict:
     global _last_call_time
 
-    # Rate-limit: wait if the previous call was too recent
     import time
     elapsed = time.monotonic() - _last_call_time
     if elapsed < _MIN_INTERVAL:
@@ -77,7 +79,10 @@ async def summarize_report(text: str) -> dict:
     for attempt in range(3):
         _last_call_time = time.monotonic()
         try:
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await _client.aio.models.generate_content(
+                model=_MODEL,
+                contents=prompt,
+            )
             raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -88,7 +93,7 @@ async def summarize_report(text: str) -> dict:
         except Exception as e:
             err = str(e)
             if "429" in err or "ResourceExhausted" in err or "quota" in err.lower():
-                wait = 15 * (attempt + 1)  # 15s, 30s, 45s
+                wait = 15 * (attempt + 1)
                 logger.warning(f"Gemini RPM 한도 초과 — {wait}초 대기 후 재시도 ({attempt + 1}/3)")
                 await asyncio.sleep(wait)
             elif attempt < 2:
