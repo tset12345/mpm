@@ -201,8 +201,12 @@ def is_stale(row: dict, current_hash: str) -> bool:
     """분석 결과가 오늘 날짜가 아니거나 보유 종목이 변경됐으면 True."""
     if not row:
         return True
-    created: datetime = row["updated_at"]
-    if hasattr(created, "tzinfo") and created.tzinfo is not None:
-        if created.date() != date.today():
-            return True
+    raw = row.get("updated_at")
+    if raw:
+        try:
+            created = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if created.date() != date.today():
+                return True
+        except (ValueError, TypeError):
+            pass
     return row.get("holdings_hash") != current_hash
