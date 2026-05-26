@@ -190,6 +190,10 @@ SECTOR_STOCKS: dict[str, list[str]] = {
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
+# KIS API 동시 호출 제한 (과부하 방지)
+_KIS_SEM = asyncio.Semaphore(5)
+
+
 def _safe_float(val, default: float = 0.0) -> float:
     try:
         s = str(val).replace("+", "").replace(",", "").strip()
@@ -206,6 +210,11 @@ def _calc_ma(closes: list[float], n: int) -> float | None:
 
 async def _fetch_stock_snapshot(stock_code: str) -> dict | None:
     """KIS API에서 현재가·등락률·거래대금·시가총액·거래량 조회."""
+    async with _KIS_SEM:
+        return await _fetch_stock_snapshot_inner(stock_code)
+
+
+async def _fetch_stock_snapshot_inner(stock_code: str) -> dict | None:
     try:
         data = await kis_client.get_stock_price(stock_code)
         out = data.get("output", {})
@@ -219,7 +228,7 @@ async def _fetch_stock_snapshot(stock_code: str) -> dict | None:
             "volume": int(_safe_float(out.get("acml_vol"))),
         }
     except Exception as e:
-        logger.warning(f"[sector_leader] KIS 조회 실패 {stock_code}: {e}")
+        logger.warning(f"[sector_leader] KIS 조회 실패 {stock_code}: {type(e).__name__}: {e}")
         return None
 
 
