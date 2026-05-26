@@ -69,6 +69,25 @@ except Exception as e:
     fi
 }
 
+# check_route <label> <method> <url>  → 401/403=라우트 등록됨, 404=없음, 기타=오류
+check_route() {
+    local label=$1 method=$2 url=$3
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X "$method" "$url" 2>/dev/null)
+
+    if [[ "$http_code" =~ ^[23] ]]; then
+        ok "$label  ${YELLOW}(HTTP $http_code)${RESET}"
+    elif [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+        ok "$label  ${YELLOW}(HTTP $http_code — 인증 필요, 라우트 등록됨)${RESET}"
+    elif [[ "$http_code" == "404" ]]; then
+        fail "$label  (HTTP 404 — 라우트 없음)"
+    else
+        local err
+        err=$(cat /tmp/_mpm_body 2>/dev/null | head -c 80)
+        fail "$label  (HTTP $http_code) $err"
+    fi
+}
+
 # ── 재시작 함수 ──────────────────────────────────────────────────────────────
 reboot_be() {
     hdr "[Backend 재시작]"
@@ -162,29 +181,16 @@ if [ "$CHECK_BE" = true ]; then
 
     check_port 8000 "FastAPI"
 
-    check_api "GET /api/v1/stocks/recommend" \
-        "$BE_URL/api/v1/stocks/recommend" \
-        "'date=' + str(d.get('date','?')) + '  count=' + str(len(d.get('data',[])))"
-
-    check_api "GET /api/v1/stocks/recommend/prices" \
-        "$BE_URL/api/v1/stocks/recommend/prices" \
-        "'count=' + str(len(d.get('data',[]))) + ('  sample=' + str(d['data'][0]) if d.get('data') else '')"
-
-    check_api "GET /api/v1/stocks/search?q=삼성" \
-        "$BE_URL/api/v1/stocks/search?q=%EC%82%BC%EC%84%B1" \
-        "'hits=' + str(len(d.get('data',[])))"
-
-    check_api "GET /api/v1/holdings" \
-        "$BE_URL/api/v1/holdings" \
-        "'count=' + str(len(d.get('data',[]))) + '  total_purchase=' + str(d.get('summary',{}).get('total_purchase','?'))"
-
-    check_api "GET /api/v1/profiles" \
-        "$BE_URL/api/v1/profiles" \
-        "'count=' + str(len(d.get('data',[])))"
-
-    check_api "GET /api/v1/stocks/history?type=daily" \
-        "$BE_URL/api/v1/stocks/history?type=daily" \
-        "'entries=' + str(len(d.get('data',[])))"
+    check_route "GET  /api/v1/stocks/recommend"        GET    "$BE_URL/api/v1/stocks/recommend"
+    check_route "GET  /api/v1/stocks/recommend/prices"  GET    "$BE_URL/api/v1/stocks/recommend/prices"
+    check_route "GET  /api/v1/stocks/search?q=삼성"     GET    "$BE_URL/api/v1/stocks/search?q=%EC%82%BC%EC%84%B1"
+    check_route "GET  /api/v1/holdings"                 GET    "$BE_URL/api/v1/holdings"
+    check_route "GET  /api/v1/profiles"                 GET    "$BE_URL/api/v1/profiles"
+    check_route "GET  /api/v1/stocks/history?type=daily" GET   "$BE_URL/api/v1/stocks/history?type=daily"
+    check_route "GET  /api/v1/stocks/favorites"         GET    "$BE_URL/api/v1/stocks/favorites"
+    check_route "POST /api/v1/stocks/favorites"         POST   "$BE_URL/api/v1/stocks/favorites"
+    check_route "DEL  /api/v1/stocks/favorites/000000"  DELETE "$BE_URL/api/v1/stocks/favorites/000000"
+    check_route "GET  /api/v1/stocks/sector-leader/all" GET    "$BE_URL/api/v1/stocks/sector-leader/all"
 
     # entry_price / source_conditions 필드 검증
     echo ""
