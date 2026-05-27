@@ -220,7 +220,7 @@ function QuantResultView({ data }: { data: StrategyAnalysisData }) {
             <div className="text-xs text-gray-500 space-y-0.5">
               <div className="flex justify-between">
                 <span>PER</span>
-                <span className="font-mono">{fs.value.per != null ? `${fs.value.per.toFixed(1)}배` : "N/A"}</span>
+                <span className="font-mono">{(fs.value.per != null && fs.value.per > 0) ? `${fs.value.per.toFixed(1)}배` : "N/A"}</span>
               </div>
               <div className="flex justify-between">
                 <span>PBR</span>
@@ -574,7 +574,7 @@ export default function StockDetailPage({ params }: { params: { code: string } }
       {/* 기본 지표 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "PER", value: metrics.per?.toFixed(1) ?? "N/A" },
+          { label: "PER", value: (metrics.per != null && metrics.per > 0) ? `${metrics.per.toFixed(1)}` : "N/A" },
           { label: "PBR", value: metrics.pbr?.toFixed(2) ?? "N/A" },
           { label: "ROE", value: metrics.roe ? `${metrics.roe.toFixed(1)}%` : "N/A" },
         ].map(({ label, value }) => (
