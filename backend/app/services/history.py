@@ -8,7 +8,7 @@
 """
 import logging
 from collections import Counter
-from datetime import timedelta
+from datetime import date, timedelta
 
 from app.core.timezone import today_kst
 from app.services.supabase_client import supabase
