@@ -167,6 +167,7 @@ cp backend/.env.example backend/.env
 | `SUPABASE_SERVICE_KEY` | Supabase service_role 키 (비공개 유지) | 동일 > service_role |
 | `DATABASE_URL` | PostgreSQL 직접 연결 URL (참고용, 마이그레이션은 Dashboard에서 수동 실행) | Supabase > Project Settings > Database > Connection string |
 | `ALLOWED_ORIGINS` | CORS 허용 출처 (쉼표 구분) | 기본값: `http://localhost:3000` |
+| `ENABLE_SCHEDULER` | APScheduler 활성화 여부 | 배포 환경에서 `true` 설정 필요 (기본값: `false`) |
 
 프론트엔드 환경 변수 (`frontend/.env.local`):
 
@@ -186,10 +187,13 @@ cp backend/.env.example backend/.env
 | `GET` | `/api/v1/stocks/search` | 종목명 검색 (stock_master 기반, KOSPI/KOSDAQ 배지) |
 | `GET` | `/api/v1/stocks/history` | 추천 히스토리 조회 (일/주/월별) |
 | `GET` | `/api/v1/stocks/{stock_code}/detail` | 종목 상세 (현재가/PER/PBR/일목균형표/기술 스코어) |
+| `GET` | `/api/v1/stocks/favorites` | 즐겨찾기 목록 조회 |
+| `POST` | `/api/v1/stocks/favorites` | 즐겨찾기 추가 |
+| `DELETE` | `/api/v1/stocks/favorites/{stock_code}` | 즐겨찾기 삭제 |
 | `POST` | `/api/v1/stocks/sync/recommendations` | 추천 종목 수동 업데이트 (KIS API 즉시 호출) |
 | `POST` | `/api/v1/stocks/sync/ohlcv` | OHLCV 수동 동기화 (종목 코드 미제공 시 거래량 상위 50개 자동 조회) |
 | `POST` | `/api/v1/stocks/sync/master` | KRX 전체 상장 종목 동기화 (kind.krx.co.kr) |
-| `GET` | `/api/v1/health` | 헬스체크 |
+| `GET` / `HEAD` | `/api/v1/health` | 헬스체크 |
 
 ### 보유 종목 (Holdings)
 
@@ -337,6 +341,14 @@ UNIQUE 제약: `(profile_id, holdings_hash, created_at)`.
 
 KOSPI 838건 + KOSDAQ 1,819건 = 약 2,657건 보관.
 
+### favorites — 즐겨찾기 종목
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `stock_code` | VARCHAR(10) PK | 종목 코드 |
+| `stock_name` | TEXT | 종목명 |
+| `created_at` | TIMESTAMPTZ | 등록 시각 |
+
 ---
 
 ## 데이터베이스 마이그레이션
@@ -359,6 +371,7 @@ KOSPI 838건 + KOSDAQ 1,819건 = 약 2,657건 보관.
 009_portfolio_analysis.sql      → portfolio_analyses
 010_profile_analysis_type.sql   → analysis_type 컬럼
 011_stock_master.sql            → stock_master
+018_favorites.sql               → favorites
 ```
 
 ### RLS(Row Level Security) 비활성화
@@ -374,6 +387,7 @@ ALTER TABLE holdings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
 ALTER TABLE portfolio_analyses DISABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_master DISABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites DISABLE ROW LEVEL SECURITY;
 ```
 
 > RLS를 비활성화하지 않으면 `service_role` 키를 사용하더라도 백엔드에서 테이블 읽기/쓰기가 차단될 수 있습니다.
@@ -389,6 +403,9 @@ ALTER TABLE stock_master DISABLE ROW LEVEL SECURITY;
 
   시작 체크: 오늘 추천 데이터 없으면 즉시 동기화 (서버 재시작 시 1회)
   08:50 KST: 장 전 추천 종목 갱신 (전일 종가 기준)
+  09:05 KST: 섹터 주도주 전체 20개 갱신
+  11:00 KST: 오전 장중 추천 종목 갱신
+  14:00 KST: 오후 장중 추천 종목 갱신
   16:10 KST: 장 후 추천 종목 갱신 + OHLCV 동기화 + 히스토리 스냅샷
 
 [16:10 KST 장 후 동기화 상세]
@@ -481,7 +498,7 @@ stock_recommendations 테이블 저장 (오늘 날짜 기존 데이터 삭제 �
 - **API 문서**: 서버 실행 후 http://localhost:8000/docs (Swagger UI) 또는 http://localhost:8000/redoc
 - **로그**: `uvicorn` 실행 시 터미널에 INFO 레벨 로그 출력. 스케줄러 실행·동기화 완료도 확인 가능.
 - **수동 동기화**: 스케줄 대기 없이 즉시 데이터를 채우려면 `POST /api/v1/stocks/sync/recommendations` 호출.
-- **즐겨찾기**: 프론트엔드의 즐겨찾기 기능은 브라우저 `localStorage`에 저장 (서버 저장 없음).
+- **즐겨찾기**: Supabase `favorites` 테이블에 저장 — 로컬/배포 환경 모두 동일한 목록 공유.
 
 ---
 
