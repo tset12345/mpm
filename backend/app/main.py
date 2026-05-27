@@ -46,6 +46,6 @@ app.include_router(portfolio.router)
 app.include_router(analysis.router)
 
 
-@app.get("/api/v1/health")
+@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
