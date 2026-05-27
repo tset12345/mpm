@@ -1,11 +1,12 @@
 import hashlib
 import json
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from typing import Optional
 
 from google import genai
 from app.core.config import settings
+from app.core.timezone import today_kst
 
 logger = logging.getLogger(__name__)
 _client = genai.Client(api_key=settings.gemini_api_key)
@@ -204,7 +205,7 @@ def is_stale(row: dict, current_hash: str) -> bool:
     if raw:
         try:
             created = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            if created.date() != date.today():
+            if created.date() != today_kst():
                 return True
         except (ValueError, TypeError):
             pass

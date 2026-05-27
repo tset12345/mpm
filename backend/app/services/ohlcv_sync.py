@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
+
+from app.core.timezone import today_kst
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
 
@@ -22,7 +24,7 @@ async def sync_ohlcv(stock_codes: list[str] | None = None) -> dict:
             logger.error(f"거래량 순위 조회 실패: {e}")
             raise
 
-    today = date.today()
+    today = today_kst()
     start_date = (today - timedelta(days=365 * 2)).strftime("%Y%m%d")
     end_date = today.strftime("%Y%m%d")
 

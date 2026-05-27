@@ -8,8 +8,9 @@
 """
 import logging
 from collections import Counter
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.core.timezone import today_kst
 from app.services.supabase_client import supabase
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def save_snapshot(stocks: list[dict]) -> None:
     stocks: 오늘의 추천 종목 리스트 (update_recommendations() 반환값).
     daily / weekly / monthly 세 가지 period_type으로 upsert 후 오래된 행 삭제.
     """
-    today = date.today()
+    today = today_kst()
     top_today = stocks[:_TOP_N]
 
     try:

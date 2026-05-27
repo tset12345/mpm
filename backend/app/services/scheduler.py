@@ -1,7 +1,8 @@
-from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
+
+from app.core.timezone import today_kst
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -33,22 +34,22 @@ async def run_sector_leader_refresh():
 
 
 async def startup_sync_if_needed():
-    """서버 시작 시 오늘 추천 데이터가 없으면 즉시 동기화."""
+    """서버 시작 시 오늘(KST) 추천 데이터가 없으면 즉시 동기화."""
     from app.services.supabase_client import supabase
-    today = date.today().isoformat()
+    today = today_kst().isoformat()
     try:
         result = supabase.table("stock_recommendations").select("stock_code").eq("date", today).limit(1).execute()
         if not result.data:
-            logger.info(f"시작 체크: 오늘({today}) 추천 데이터 없음 → 즉시 동기화 실행")
+            logger.info(f"시작 체크: 오늘 KST({today}) 추천 데이터 없음 → 즉시 동기화 실행")
             await run_daily_sync()
         else:
-            logger.info(f"시작 체크: 오늘({today}) 추천 데이터 확인됨 ({len(result.data)}건)")
+            logger.info(f"시작 체크: 오늘 KST({today}) 추천 데이터 확인됨 ({len(result.data)}건)")
     except Exception as e:
         logger.warning(f"시작 체크 실패: {e}")
 
 
 def start_scheduler():
-    # 서버 재시작 시 오늘 데이터가 없으면 즉시 동기화 (1회성 트리거)
+    # 서버 시작 시 오늘(KST) 데이터가 없으면 즉시 동기화 (1회성)
     scheduler.add_job(
         startup_sync_if_needed,
         "date",
@@ -77,4 +78,4 @@ def start_scheduler():
         misfire_grace_time=3600,
     )
     scheduler.start()
-    logger.info("스케줄러 시작 — 08:50 / 11:00 / 14:00 / 16:10 추천 | 09:05 섹터주도주 (월~금 KST)")
+    logger.info("스케줄러 시작 — 08:50 / 11:00 / 14:00 / 16:10 추천 | 09:05 섹터주도주 (월~금 KST, Asia/Seoul)")

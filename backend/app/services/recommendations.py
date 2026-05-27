@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from datetime import date, timedelta, datetime, timezone
+from datetime import timedelta, datetime, timezone
+
+from app.core.timezone import today_kst
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
@@ -144,7 +146,7 @@ async def _fetch_ohlcv_range(
 def _load_fund_scores(codes: list[str]) -> dict[str, int]:
     """최근 7일 AI 리포트에서 종목별 긍정 점수 산출."""
     fund: dict[str, int] = {code: 0 for code in codes}
-    since = (date.today() - timedelta(days=7)).isoformat()
+    since = (today_kst() - timedelta(days=7)).isoformat()
     try:
         rows = (
             supabase.table("reports")
@@ -174,7 +176,7 @@ def _load_fund_scores(codes: list[str]) -> dict[str, int]:
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 
 async def update_recommendations() -> list[dict]:
-    today         = date.today()
+    today         = today_kst()
     today_str     = today.isoformat()                        # YYYY-MM-DD
     today_kis     = today.strftime("%Y%m%d")                 # YYYYMMDD
     today_iso     = today_str                                # alias
