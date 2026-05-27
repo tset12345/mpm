@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,9 +11,12 @@ from app.core.config import settings
 from app.routers import stocks, holdings, profiles, portfolio, analysis
 from app.services.scheduler import start_scheduler, scheduler
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info(f"[startup] enable_scheduler={settings.enable_scheduler}")
     if settings.enable_scheduler:
         start_scheduler()
     yield
