@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"[startup] enable_scheduler={settings.enable_scheduler}")
+    import os
+    print(f"[startup] ENABLE_SCHEDULER env={os.environ.get('ENABLE_SCHEDULER')!r}, setting={settings.enable_scheduler}", flush=True)
     if settings.enable_scheduler:
         start_scheduler()
     yield
