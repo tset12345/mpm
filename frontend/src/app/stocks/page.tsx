@@ -259,6 +259,8 @@ export default function StocksPage() {
               volume: d.volume,
               tags: d.technical.tags,
               tech_score: d.technical.score,
+              engine_a_score: d.technical.engine_a_score,
+              engine_b_score: d.technical.engine_b_score,
             };
           });
         setExtraFavoriteData(mapped);
@@ -344,6 +346,17 @@ export default function StocksPage() {
                   <div className="flex flex-col items-end gap-1">
                     <ScoreBadge tech={s.tech_score} fund={s.fund_score} total={s.total_score} />
                     <EngineBadge tags={s.tags} />
+                    {((s.engine_a_score ?? 0) > 0 || (s.engine_b_score ?? 0) > 0) && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono">
+                        <span className={s.tags?.includes("추세 돌파형") ? "font-bold text-orange-600" : "text-gray-300"}>
+                          A {s.engine_a_score ?? 0}
+                        </span>
+                        <span className="text-gray-200">·</span>
+                        <span className={s.tags?.includes("역추세 반등형") ? "font-bold text-sky-600" : "text-gray-300"}>
+                          B {s.engine_b_score ?? 0}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td className="px-4 py-3">

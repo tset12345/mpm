@@ -33,6 +33,8 @@
 | 연속 5일+ | `purple-100 / purple-700` | — | ConsecutiveBadge |
 | 연속 3–4일 | `indigo-100 / indigo-700` | — | ConsecutiveBadge |
 | 연속 2일 | `teal-100 / teal-700` | — | ConsecutiveBadge |
+| Engine A (추세 돌파형) | `orange-100 / orange-700` | — | EngineBadge ⬆ 추세 |
+| Engine B (역추세 반등형) | `sky-100 / sky-700` | — | EngineBadge ↩ 역추세 |
 | Gray 50 | `gray-50` | `#F9FAFB` | 테이블 헤더, 페이지 배경 |
 | Gray 100 | `gray-100` | `#F3F4F6` | 비활성 탭, 종목코드 배지 배경 |
 | Gray 400 | `gray-400` | `#9CA3AF` | 로딩 텍스트, 보조 텍스트 |
@@ -78,6 +80,8 @@
 | 종류 | Tailwind 클래스 | 예시 |
 |------|----------------|------|
 | 종목 태그 | `bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full` | `골든크로스` |
+| 엔진 배지 (A) | `text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700` | `⬆ 추세` |
+| 엔진 배지 (B) | `text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700` | `↩ 역추세` |
 | 소스 배지 | `text-[10px] font-semibold px-1.5 py-0.5 rounded` + 조건별 색상 | `거래대금` |
 | 점수 배지 | `text-xs font-bold px-2 py-0.5 rounded font-mono` + 점수별 색상 | `82` |
 | 리포트 보너스 | `text-xs text-emerald-600 font-semibold` | `+5📄` |

@@ -320,6 +320,8 @@ async def update_recommendations() -> list[dict]:
             "tech_score":        ta["score"],
             "fund_score":        fs,
             "total_score":       total,
+            "engine_a_score":    ta.get("engine_a_score", 0),
+            "engine_b_score":    ta.get("engine_b_score", 0),
             "source_conditions": sorted(source_map.get(code, set())),
         })
 
@@ -375,6 +377,7 @@ def _make_fallback_rows(today_str: str) -> list[dict]:
             "date": today_str, "stock_code": code, "stock_name": name,
             "current_price": price, "change_rate": 0.0, "volume": 0,
             "tags": ["폴백 데이터"], "tech_score": 0, "fund_score": 0, "total_score": 0,
+            "engine_a_score": 0, "engine_b_score": 0,
         }
         for code, name, price in FALLBACK_STOCKS
     ]

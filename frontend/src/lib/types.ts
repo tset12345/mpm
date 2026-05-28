@@ -14,6 +14,8 @@ export interface StockSummary {
   first_entry_price?: number | null;
   source_conditions?: string[];
   market?: "KOSPI" | "KOSDAQ";
+  engine_a_score?: number;
+  engine_b_score?: number;
 }
 
 export interface TechnicalSignals {
