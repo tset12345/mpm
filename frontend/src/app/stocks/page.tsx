@@ -34,6 +34,16 @@ function ScoreBadge({ tech, fund, total }: { tech?: number; fund?: number; total
   );
 }
 
+const ENGINE_TAGS = new Set(["추세 돌파형", "역추세 반등형"]);
+
+function EngineBadge({ tags }: { tags?: string[] }) {
+  if (tags?.includes("추세 돌파형"))
+    return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 whitespace-nowrap">⬆ 추세</span>;
+  if (tags?.includes("역추세 반등형"))
+    return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 whitespace-nowrap">↩ 역추세</span>;
+  return null;
+}
+
 const SOURCE_STYLE: Record<string, string> = {
   "거래대금": "bg-slate-100 text-slate-600",
   "기관외인": "bg-violet-100 text-violet-700",
@@ -331,11 +341,14 @@ export default function StocksPage() {
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-gray-500">{s.volume?.toLocaleString() ?? "-"}</td>
                 <td className="px-4 py-3 text-right">
-                  <ScoreBadge tech={s.tech_score} fund={s.fund_score} total={s.total_score} />
+                  <div className="flex flex-col items-end gap-1">
+                    <ScoreBadge tech={s.tech_score} fund={s.fund_score} total={s.total_score} />
+                    <EngineBadge tags={s.tags} />
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1 flex-wrap">
-                    {(s.tags ?? []).map((tag) => (
+                    {(s.tags ?? []).filter((tag) => !ENGINE_TAGS.has(tag)).map((tag) => (
                       <span key={tag} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">{tag}</span>
                     ))}
                   </div>

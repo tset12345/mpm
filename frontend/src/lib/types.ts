@@ -110,8 +110,11 @@ export interface StockDetail {
     score: number;
     tags: string[];
     signals: TechnicalSignals;
-    score_detail: { trend: number; momentum: number; volatility: number; volume: number };
+    score_detail: { engine_a: number; engine_b: number };
     strength: string;
+    engine?: "A" | "B" | null;
+    engine_a_score?: number;
+    engine_b_score?: number;
   };
 }
 

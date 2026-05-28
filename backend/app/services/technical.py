@@ -637,16 +637,69 @@ def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
         "약함"
     )
 
+    # ── Display signals: all indicators for detail page ────────────────────────
+    macd_res = _macd_series(closes)
+    macd_val = macd_res[0][-1] if macd_res and macd_res[0] else None
+    macd_sig = macd_res[1][-1] if macd_res and macd_res[1] else None
+
+    sk, sd = stochastic(highs, lows, closes, 14, 3)
+    cci_v   = cci(highs, lows, closes, 20)
+    mfi_v   = mfi(highs, lows, closes, volumes, 14)
+    plus_di, minus_di, adx = dmi(highs, lows, closes, 14)
+    obv_s   = obv_series(closes, volumes)
+    env     = envelope(closes, 20, 0.05)
+    sar_v, _ = parabolic_sar(highs, lows)
+    fib     = fibonacci_support(highs, lows, closes)
+    vr_v    = volume_ratio(closes, volumes, 20)
+    ch_v    = chaikin_osc(highs, lows, closes, volumes)
+    bb      = bollinger(closes, 20, 2.0)
+
+    if bb is not None:
+        bbu, bbm, bbl = bb
+        bw = round((bbu - bbl) / bbm * 100, 2) if bbm else None
+    else:
+        bbu = bbm = bbl = bw = None
+
+    piv_s2    = pivot_point(highs[-2], lows[-2], closes[-2])["s2"] if len(highs) >= 2 else None
+    disparity = round(cur / ma20 * 100, 2) if ma20 else None
+    vol_ratio_v = round(volumes[-1] / vol_ma20, 2) if vol_ma20 > 0 else None
+
+    signals = {
+        "ma5": ma5, "ma20": ma20, "ma60": ma60,
+        "macd": round(macd_val) if macd_val is not None else None,
+        "macd_signal": round(macd_sig) if macd_sig is not None else None,
+        "rsi": round(rsi_val, 1) if rsi_val is not None else None,
+        "stoch_k": round(sk, 1) if sk is not None else None,
+        "stoch_d": round(sd, 1) if sd is not None else None,
+        "bb_upper": round(bbu) if bbu is not None else None,
+        "bb_lower": round(bbl) if bbl is not None else None,
+        "bb_bandwidth": bw,
+        "disparity": disparity,
+        "adx": round(adx, 1) if adx is not None else None,
+        "plus_di": round(plus_di, 1) if plus_di is not None else None,
+        "minus_di": round(minus_di, 1) if minus_di is not None else None,
+        "cci": round(cci_v, 1) if cci_v is not None else None,
+        "mfi": round(mfi_v, 1) if mfi_v is not None else None,
+        "atr": round(atr_val) if atr_val is not None else None,
+        "obv": obv_s[-1] if obv_s else None,
+        "volume_ma20": round(vol_ma20),
+        "volume_ratio": vol_ratio_v,
+        "vr": round(vr_v, 1) if vr_v is not None else None,
+        "chaikin_osc": round(ch_v) if ch_v is not None else None,
+        "parabolic_sar": round(sar_v) if sar_v is not None else None,
+        "env_upper": round(env[0]) if env is not None else None,
+        "env_lower": round(env[2]) if env is not None else None,
+        "pivot_s2": round(piv_s2) if piv_s2 is not None else None,
+        "fib_level": fib["level"],
+        "fib_ratio": fib["ratio"],
+        "fib_reason": fib["reason"],
+        "cloud_position": cloud_position,
+    }
+
     return {
         "score": score,
         "tags": tags,
-        "signals": {
-            "ma5": ma5, "ma20": ma20, "ma60": ma60,
-            "rsi": round(rsi_val, 1) if rsi_val is not None else None,
-            "atr": atr_val,
-            "volume_ma20": round(vol_ma20, 0),
-            "cloud_position": cloud_position,
-        },
+        "signals": signals,
         "engine": engine,
         "engine_a_score": score_a,
         "engine_b_score": score_b,

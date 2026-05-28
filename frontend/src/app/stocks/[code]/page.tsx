@@ -471,7 +471,8 @@ export default function StockDetailPage({ params }: { params: { code: string } }
   );
 
   const { metrics, ichimoku, technical, expected_return, current_price, change_rate, change_amount, volume, price_info, fetched_at } = detail;
-  const { score, tags, signals, score_detail, strength } = technical;
+  const { score, tags, signals, score_detail, strength, engine } = technical;
+  const engineLabel = engine === "A" ? "추세 돌파형" : engine === "B" ? "역추세 반등형" : null;
   const scorePct = Math.min(100, Math.max(0, score / MAX_SCORE * 100));
   const scoreColor =
     score >= 75 ? "bg-red-500" : score >= 50 ? "bg-orange-400" : score >= 25 ? "bg-yellow-400" : "bg-blue-300";
@@ -598,7 +599,16 @@ export default function StockDetailPage({ params }: { params: { code: string } }
       {/* 기술적 분석 스코어 */}
       <div className="border rounded-lg p-5">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="font-semibold">기술적 분석</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold">기술적 분석</h2>
+            {engineLabel && (
+              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                engine === "A" ? "bg-orange-100 text-orange-700" : "bg-sky-100 text-sky-700"
+              }`}>
+                {engine === "A" ? "⬆" : "↩"} {engineLabel}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${STRENGTH_STYLE[strength] ?? STRENGTH_STYLE["약함"]}`}>
               {strength}
@@ -615,12 +625,20 @@ export default function StockDetailPage({ params }: { params: { code: string } }
           <div className={`h-2 rounded-full transition-all ${scoreColor}`} style={{ width: `${scorePct}%` }} />
         </div>
 
-        {/* 카테고리별 점수 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          <CategoryBar label="A. 추세"    score={score_detail.trend}      color="bg-indigo-400" />
-          <CategoryBar label="B. 모멘텀"  score={score_detail.momentum}   color="bg-green-400" />
-          <CategoryBar label="C. 변동성"  score={score_detail.volatility} color="bg-yellow-400" />
-          <CategoryBar label="D. 거래량"  score={score_detail.volume}     color="bg-orange-400" />
+        {/* 듀얼 엔진 점수 */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <CategoryBar
+            label="Engine A — 추세 돌파형"
+            score={score_detail.engine_a ?? 0}
+            max={100}
+            color={engine === "A" ? "bg-orange-400" : "bg-gray-300"}
+          />
+          <CategoryBar
+            label="Engine B — 역추세 반등형"
+            score={score_detail.engine_b ?? 0}
+            max={100}
+            color={engine === "B" ? "bg-sky-400" : "bg-gray-300"}
+          />
         </div>
 
         {/* 매수 신호 태그 */}
