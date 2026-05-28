@@ -25,10 +25,10 @@
   }
 """
 
+from __future__ import annotations
+
 import math
 from typing import Optional
-
-import pandas as pd
 
 from .base import BaseStrategy, StrategyValidationError
 
@@ -57,7 +57,7 @@ class QuantStrategy(BaseStrategy):
                 f"OHLCV 데이터가 최소 20봉 필요합니다. (현재 {len(ohlcv)}봉)"
             )
 
-        # pandas Series 생성
+        import pandas as pd
         df = pd.DataFrame(ohlcv)
         closes = df["close"].astype(float)
 

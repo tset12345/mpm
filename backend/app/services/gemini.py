@@ -2,13 +2,19 @@ import asyncio
 import json
 import logging
 
-from google import genai
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-_client = genai.Client(api_key=settings.gemini_api_key)
+_client = None  # lazy-initialized on first use
 _MODEL = "gemini-2.5-flash-lite"
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from google import genai
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 # Free-tier: ~15 RPM → enforce a minimum interval between calls
 _MIN_INTERVAL = 5.0  # seconds between consecutive Gemini requests
@@ -47,7 +53,7 @@ async def call_gemini_text(prompt: str) -> str:
     for attempt in range(3):
         _last_call_time = time.monotonic()
         try:
-            response = await _client.aio.models.generate_content(
+            response = await _get_client().aio.models.generate_content(
                 model=_MODEL,
                 contents=prompt,
             )
@@ -79,7 +85,7 @@ async def summarize_report(text: str) -> dict:
     for attempt in range(3):
         _last_call_time = time.monotonic()
         try:
-            response = await _client.aio.models.generate_content(
+            response = await _get_client().aio.models.generate_content(
                 model=_MODEL,
                 contents=prompt,
             )

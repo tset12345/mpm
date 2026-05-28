@@ -4,13 +4,20 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from google import genai
 from app.core.config import settings
 from app.core.timezone import today_kst
 
 logger = logging.getLogger(__name__)
-_client = genai.Client(api_key=settings.gemini_api_key)
+_client = None  # lazy-initialized on first use
 _MODEL = "gemini-2.5-flash-lite"
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from google import genai
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
 def compute_holdings_hash(holdings: list[dict]) -> str:
@@ -193,7 +200,7 @@ async def run_analysis(holdings: list[dict], profile_name: str, analysis_type: s
         prompt = _build_prompt_dividend(holdings, profile_name)
     else:
         prompt = _build_prompt_quant(holdings, profile_name)
-    response = await _client.aio.models.generate_content(model=_MODEL, contents=prompt)
+    response = await _get_client().aio.models.generate_content(model=_MODEL, contents=prompt)
     return response.text.strip()
 
 

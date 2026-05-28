@@ -32,9 +32,9 @@
   }
 """
 
-from typing import Optional
+from __future__ import annotations
 
-import pandas as pd
+from typing import Optional
 
 from .base import BaseStrategy, StrategyValidationError
 
@@ -53,6 +53,7 @@ class DividendStrategy(BaseStrategy):
         dividends: list[dict] = data["dividends"]
         financials: list[dict] = data.get("financials", [])
 
+        import pandas as pd
         div_df = pd.DataFrame(dividends).sort_values("year").reset_index(drop=True)
         fin_df = pd.DataFrame(financials).sort_values("year").reset_index(drop=True) if financials else pd.DataFrame()
 
@@ -138,6 +139,7 @@ class DividendStrategy(BaseStrategy):
         self, div_df: pd.DataFrame, fin_df: pd.DataFrame, payout_latest: Optional[float]
     ) -> tuple[list[dict], int]:
         """배당 안정성 점수(0~100)와 항목별 상세를 반환한다."""
+        import pandas as pd
         detail: list[dict] = []
         total = 0
 

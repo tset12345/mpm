@@ -17,7 +17,6 @@ from datetime import date
 from typing import Optional
 
 import httpx
-import pandas as pd
 
 from app.core.config import settings
 
@@ -100,6 +99,7 @@ async def fetch_financial_statements(corp_code: str, years: list[int]) -> pd.Dat
     Returns DataFrame:
         columns: year, sj_div, account_nm, amount(float)
     """
+    import pandas as pd
     rows: list[dict] = []
 
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -145,6 +145,7 @@ async def fetch_dividend_info(corp_code: str, years: list[int]) -> pd.DataFrame:
     Returns DataFrame:
         columns: year, dps(float), payout_ratio(float), dividend_yield(float)
     """
+    import pandas as pd
     records: list[dict] = []
 
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -194,6 +195,7 @@ async def collect_dart_data(stock_code: str, n_years: int = 3) -> dict:
           "error": str | None,
         }
     """
+    import pandas as pd
     corp_code = await get_corp_code(stock_code)
     if not corp_code:
         return {
