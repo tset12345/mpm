@@ -1,10 +1,30 @@
 """
-Technical analysis scoring module for MPM recommendation engine.
+Technical analysis dual-engine scoring module for MPM recommendation engine.
 All indicator functions operate on chronologically sorted data (oldest first).
-Scoring: 4 categories × max 10 points = 40 total.
+
+Stage 1 — Hard Filter
+  MA20 daily volume ≥ MIN_VOL_MA20. Fails → score=0 immediately.
+
+Stage 2 — Dual Engine Scoring (each 0-100)
+  Engine A – Trend Following (max 100)
+    골든크로스 (15) · ADX/DMI 상승추세 (15) · 일목 구름대 돌파 (15)
+    볼린저 스퀴즈 상단돌파 (15) · 전고점 돌파+거래량 (15)
+    OBV 선행 돌파 (15) · 거래량 급증 (10)
+    Soft veto: RSI ≥ 70 → -10
+
+  Engine B – Mean Reversion (max 100)
+    이격도 저점 (15) · 과매도 그룹 RSI/Stoch/CCI/MFI ≥2→25 (25)
+    서포트밴드 Bollinger/Envelope/Pivot/Fibonacci + 양봉 (35)
+    눌림목 반등 (25)
+
+  Final score = max(engine_a_score, engine_b_score).
+  Winning engine sets tags.
 """
 
 import math
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+MIN_VOL_MA20 = 100_000   # Hard filter: minimum MA20 daily volume (shares)
 
 
 # ── Basic building blocks ──────────────────────────────────────────────────────
@@ -181,8 +201,6 @@ def obv(closes: list[float], volumes: list[float]) -> float | None:
     return s[-1] if s else None
 
 
-# ── New indicators ─────────────────────────────────────────────────────────────
-
 def mfi(
     highs: list[float], lows: list[float], closes: list[float],
     volumes: list[float], period: int = 14
@@ -228,10 +246,7 @@ def parabolic_sar(
     highs: list[float], lows: list[float],
     af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2
 ) -> tuple[float | None, bool]:
-    """
-    Parabolic SAR.
-    Returns (sar_value, is_bullish) where is_bullish = price above SAR.
-    """
+    """Parabolic SAR. Returns (sar_value, is_bullish)."""
     n = len(highs)
     if n < 3:
         return None, False
@@ -289,10 +304,7 @@ def fibonacci_support(
 ) -> dict:
     """
     Fibonacci retracement support detection.
-    Finds the most recent swing low→high, computes 38.2%/50%/61.8% retracement levels,
-    and checks whether the current price is near any of them (within ±tolerance).
-    Returns {"level": float|None, "ratio": float|None, "near": bool, "reason": str|None}.
-    reason is set when near=False to explain why no level matched.
+    Returns {"level", "ratio", "near": bool, "reason"}.
     """
     def _no(reason: str) -> dict:
         return {"level": None, "ratio": None, "near": False, "reason": reason}
@@ -313,7 +325,6 @@ def fibonacci_support(
     if not swing_highs or not swing_lows:
         return _no("스윙 감지 불가")
 
-    # Most recent valid swing pair (range ≥ 3%) — iterate newest-first
     sh_idx = sh_price = sl_idx = sl_price = None
     for _sh_idx, _sh_price in reversed(swing_highs):
         preceding = [(i, p) for i, p in swing_lows if i < _sh_idx]
@@ -330,7 +341,6 @@ def fibonacci_support(
         return _no("유효 스윙 없음")
 
     swing_range = sh_price - sl_price
-
     cur = closes[-1]
     l382 = sh_price - 0.382 * swing_range
     l500 = sh_price - 0.500 * swing_range
@@ -354,10 +364,7 @@ def fibonacci_support(
 
 
 def volume_ratio(closes: list[float], volumes: list[float], period: int = 20) -> float | None:
-    """
-    Volume Ratio (VR) = (up_vol + 0.5*flat_vol) / (down_vol + 0.5*flat_vol) × 100.
-    VR < 70 = oversold, VR > 150 = overbought.
-    """
+    """VR = (up_vol + 0.5*flat_vol) / (down_vol + 0.5*flat_vol) × 100."""
     if len(closes) < period + 1 or len(volumes) < period + 1:
         return None
     up_vol = flat_vol = down_vol = 0.0
@@ -374,42 +381,207 @@ def volume_ratio(closes: list[float], volumes: list[float], period: int = 20) ->
     return (up_vol + 0.5 * flat_vol) / denom * 100
 
 
-def _rsi_bullish_divergence(
-    closes: list[float], period: int = 14, lookback: int = 20
-) -> bool:
-    """Bullish RSI divergence: price lower low while RSI makes higher low."""
-    if len(closes) < period + lookback + 5:
-        return False
-    recent_window = closes[-5:]
-    recent_low_price = min(recent_window)
-    recent_low_idx = len(closes) - 5 + recent_window.index(recent_low_price)
-    prev_window = closes[-lookback:-5]
-    if not prev_window:
-        return False
-    prev_low_price = min(prev_window)
-    prev_low_idx = len(closes) - lookback + prev_window.index(prev_low_price)
-    if recent_low_price >= prev_low_price:
-        return False
-    rsi_recent = rsi(closes[:recent_low_idx + 1], period)
-    rsi_prev = rsi(closes[:prev_low_idx + 1], period)
-    if rsi_recent is None or rsi_prev is None:
-        return False
-    return rsi_recent > rsi_prev
+# ── Engine A: Trend Following (0-100) ─────────────────────────────────────────
+
+def _engine_a(
+    closes: list[float], highs: list[float], lows: list[float], volumes: list[float],
+    cur: float, ma5: float | None, ma20: float | None, ma60: float | None,
+    rsi_val: float | None, vol_ma20: float, cloud_position: str,
+) -> tuple[int, list[str]]:
+    score = 0
+    tags: list[str] = []
+
+    # 1. 골든크로스 (max 15)
+    if ma5 is not None and ma20 is not None:
+        full_aligned = ma60 is not None and ma5 > ma20 > ma60
+        crossed = False
+        for offset in range(1, 4):
+            if len(closes) >= offset + 20:
+                pm5 = sma(closes[:-offset], 5)
+                pm20 = sma(closes[:-offset], 20)
+                if pm5 is not None and pm20 is not None and pm5 <= pm20 and ma5 > ma20:
+                    crossed = True
+                    break
+        if full_aligned or crossed:
+            score += 15
+            tags.append("골든크로스")
+        elif ma5 > ma20:
+            score += 8
+
+    # 2. 강한 상승추세 ADX/DMI (max 15)
+    plus_di, minus_di, adx = dmi(highs, lows, closes, 14)
+    if adx is not None and plus_di is not None and minus_di is not None and plus_di > minus_di:
+        if adx >= 25:
+            score += 15
+            tags.append("강한 상승추세")
+        elif adx >= 20:
+            score += 10
+            tags.append("강한 상승추세")
+
+    # 3. 일목 구름대 돌파 (max 15)
+    if cloud_position == "above_cloud":
+        score += 15
+        tags.append("일목 구름대 돌파")
+    elif cloud_position == "in_cloud":
+        score += 5
+
+    # 4. 볼린저 스퀴즈 상단돌파 (max 15)
+    bb = bollinger(closes, 20, 2.0)
+    if bb is not None:
+        bbu, bbm, _ = bb
+        bandwidth = (bbu - bb[2]) / bbm * 100 if bbm != 0 else 0
+        if bandwidth < 10 and cur >= bbu:
+            score += 15
+            tags.append("볼린저 스퀴즈 상단돌파")
+        elif bandwidth < 10 and cur > bbm:
+            score += 6
+
+    # 5. 전고점 돌파 + 거래량 (max 15)
+    if len(highs) >= 22 and vol_ma20 > 0:
+        recent_h = max(highs[-21:-1])
+        if cur > recent_h:
+            vol_ratio_val = volumes[-1] / vol_ma20 if vol_ma20 > 0 else 0
+            score += 15 if vol_ratio_val >= 1.5 else 8
+            tags.append("전고점 돌파")
+
+    # 6. OBV 선행 돌파 (max 15)
+    obv_s = obv_series(closes, volumes)
+    if len(obv_s) >= 21 and len(highs) >= 21:
+        obv_high = max(obv_s[-21:-1])
+        price_high = max(highs[-21:-1])
+        if obv_s[-1] > obv_high:
+            if cur <= price_high:   # OBV leads price — strongest signal
+                score += 15
+                tags.append("OBV 선행 돌파")
+            else:
+                score += 8
+
+    # 7. 거래량 급증 (max 10)
+    if vol_ma20 > 0 and len(closes) >= 2 and closes[-1] > closes[-2]:
+        vr = volumes[-1] / vol_ma20
+        if vr >= 3.0:
+            score += 10
+            tags.append("거래량 급증")
+        elif vr >= 2.0:
+            score += 7
+            tags.append("거래량 급증")
+        elif vr >= 1.5:
+            score += 3
+
+    # Soft veto: RSI ≥ 70 과열 감점
+    if rsi_val is not None and rsi_val >= 70:
+        score = max(0, score - 10)
+
+    return min(100, score), tags
+
+
+# ── Engine B: Mean Reversion (0-100) ──────────────────────────────────────────
+
+def _engine_b(
+    closes: list[float], highs: list[float], lows: list[float], volumes: list[float],
+    cur: float, ma5: float | None, ma20: float | None,
+    rsi_val: float | None,
+) -> tuple[int, list[str]]:
+    score = 0
+    tags: list[str] = []
+    bullish = len(closes) >= 2 and closes[-1] > closes[-2]
+
+    # 1. 이격도 저점 (max 15)
+    if ma20 is not None and ma20 > 0:
+        disparity = cur / ma20 * 100
+        if disparity < 93:
+            score += 15
+            tags.append("이격도 저점")
+        elif disparity < 95:
+            score += 12
+            tags.append("이격도 저점")
+        elif disparity < 97:
+            score += 8
+            tags.append("이격도 저점")
+        elif disparity < 99:
+            score += 3
+
+    # 2. 과매도 그룹: RSI / Stoch / CCI / MFI (max 25, grouped — ≥2 signals)
+    oversold_signals: list[str] = []
+
+    if rsi_val is not None and rsi_val < 35:
+        oversold_signals.append("RSI")
+    sk, _ = stochastic(highs, lows, closes, 14, 3)
+    if sk is not None and sk < 25:
+        oversold_signals.append("Stoch")
+    cci_val = cci(highs, lows, closes, 20)
+    if cci_val is not None and cci_val < -80:
+        oversold_signals.append("CCI")
+    mfi_val = mfi(highs, lows, closes, volumes, 14)
+    if mfi_val is not None and mfi_val < 25:
+        oversold_signals.append("MFI")
+
+    n_over = len(oversold_signals)
+    if n_over >= 3:
+        score += 25
+        tags.append(f"과매도 집중({'+'.join(oversold_signals)})")
+    elif n_over == 2:
+        score += 20
+        tags.append(f"과매도 집중({'+'.join(oversold_signals)})")
+    elif n_over == 1:
+        score += 10
+        tags.append(f"{oversold_signals[0]} 과매도")
+
+    # 3. 서포트밴드 통합 (max 35): Bollinger / Envelope / Pivot S2 / Fibonacci + 양봉
+    support_labels: list[str] = []
+
+    bb = bollinger(closes, 20, 2.0)
+    if bb is not None and cur <= bb[2] * 1.02:
+        support_labels.append("볼린저하단")
+
+    env = envelope(closes, 20, 0.05)
+    if env is not None and cur <= env[2] * 1.01:
+        support_labels.append("엔벨로프하단")
+
+    if len(highs) >= 2:
+        piv = pivot_point(highs[-2], lows[-2], closes[-2])
+        if piv["s2"] * 0.99 <= cur <= piv["s2"] * 1.05:
+            support_labels.append("피봇S2")
+
+    fib = fibonacci_support(highs, lows, closes)
+    if fib["near"]:
+        support_labels.append(f"피보나치{round((fib['ratio'] or 0) * 100, 0):.0f}%")
+
+    n_sup = len(support_labels)
+    if n_sup >= 2:
+        score += 35 if bullish else 20
+        tags.append(f"수요밴드({'+'.join(support_labels[:2])})")
+    elif n_sup == 1:
+        score += 20 if bullish else 8
+        tags.append(support_labels[0])
+
+    # 4. 눌림목 반등 (max 25)
+    if (ma5 is not None and ma20 is not None and ma5 > ma20 and cur > ma20
+            and lows and any(abs(l - ma20) / ma20 < 0.02 for l in lows[-5:])):
+        if bullish:
+            score += 25
+            tags.append("눌림목 반등")
+        else:
+            score += 12
+            tags.append("눌림목 근접")
+
+    return min(100, score), tags
 
 
 # ── Main scoring function ──────────────────────────────────────────────────────
 
 def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
     """
-    Technical analysis scoring: 4 categories × max 10 pts = 40 total.
+    Dual-engine technical analysis scoring.
 
     Args:
         records: OHLCV dicts sorted oldest-first (keys: stck_hgpr, stck_lwpr, stck_clpr, acml_vol).
-        cloud_position: Ichimoku position ("above_cloud" | "in_cloud" | "below_cloud" | "unknown").
+        cloud_position: "above_cloud" | "in_cloud" | "below_cloud" | "unknown".
     """
     EMPTY: dict = {
         "score": 0, "tags": [], "signals": {},
-        "score_detail": {"trend": 0, "momentum": 0, "volatility": 0, "volume": 0},
+        "engine": None, "engine_a_score": 0, "engine_b_score": 0,
+        "score_detail": {"engine_a": 0, "engine_b": 0},
         "strength": "약함",
     }
 
@@ -429,279 +601,35 @@ def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
     if len(closes) < 30:
         return EMPTY
 
-    tags: list[str] = []
-    signals: dict = {}
     cur = closes[-1]
 
-    # ── A. 추세 분석 (max 10) ─────────────────────────────────────────────────
-    a = 0
+    # ── Stage 1: Hard Filter ──────────────────────────────────────────────────
+    vol_ma20 = sma(volumes, 20)
+    if vol_ma20 is None or vol_ma20 < MIN_VOL_MA20:
+        return {**EMPTY, "filter_failed": "low_volume"}
 
-    ma5 = sma(closes, 5)
+    # ── Pre-compute shared indicators ─────────────────────────────────────────
+    ma5  = sma(closes, 5)
     ma20 = sma(closes, 20)
     ma60 = sma(closes, 60) if len(closes) >= 60 else None
-    signals.update({"ma5": ma5, "ma20": ma20, "ma60": ma60})
-
-    # MA 정배열 / 골든크로스 (+2)
-    if ma5 is not None and ma20 is not None:
-        aligned = (ma60 is not None and ma5 > ma20 > ma60) or (ma60 is None and ma5 > ma20)
-        crossed = False
-        for offset in range(1, 4):
-            if len(closes) >= offset + 20:
-                pm5 = sma(closes[:-offset], 5)
-                pm20 = sma(closes[:-offset], 20)
-                if pm5 is not None and pm20 is not None and pm5 <= pm20 and ma5 > ma20:
-                    crossed = True
-                    break
-        if aligned or crossed:
-            a += 2
-            tags.append("골든크로스")
-
-    # MACD 상향돌파 (+2) / 오실레이터 양전 (+1)
-    macd_result = _macd_series(closes)
-    macd_val = macd_sig = None
-    if macd_result is not None:
-        ml, sl = macd_result
-        if len(ml) >= 2 and len(sl) >= 2:
-            macd_val, macd_sig = ml[-1], sl[-1]
-            if ml[-1] > sl[-1] and ml[-2] <= sl[-2]:
-                a += 2
-                tags.append("MACD 상향돌파")
-            if (ml[-1] - sl[-1]) > 0 and (ml[-2] - sl[-2]) <= 0:
-                a += 1
-                tags.append("MACD 오실레이터 양전")
-        else:
-            macd_val = ml[-1] if ml else None
-            macd_sig = sl[-1] if sl else None
-    signals.update({"macd": macd_val, "macd_signal": macd_sig})
-
-    # 이격도 저점 (+1)
-    disparity = cur / ma20 * 100 if ma20 else None
-    signals["disparity"] = disparity
-    if disparity is not None and disparity < 97:
-        a += 1
-        tags.append("이격도 저점")
-
-    # DMI / ADX: 강한 상승추세 (+2)
-    plus_di, minus_di, adx = dmi(highs, lows, closes, 14)
-    signals.update({"adx": adx, "plus_di": plus_di, "minus_di": minus_di})
-    if adx is not None and plus_di is not None and minus_di is not None:
-        if adx >= 20 and plus_di > minus_di:
-            a += 2
-            tags.append("강한 상승추세")
-
-    # 일목 구름대 돌파 (+2)
-    if cloud_position == "above_cloud":
-        a += 2
-        tags.append("일목 구름대 돌파")
-
-    # Parabolic SAR 매수전환: +2 if just reversed to bullish, +1 if continuing
-    sar_val, sar_bull = parabolic_sar(highs, lows)
-    signals["parabolic_sar"] = sar_val
-    if sar_val is not None and sar_bull:
-        if len(highs) >= 4:
-            _, prev_bull = parabolic_sar(highs[:-1], lows[:-1])
-            if not prev_bull:
-                a += 2
-                tags.append("Parabolic 매수전환")
-            else:
-                a += 1
-        else:
-            a += 1
-
-    a = min(a, 10)
-
-    # ── B. 모멘텀 분석 (max 10) ──────────────────────────────────────────────
-    b = 0
-
     rsi_val = rsi(closes, 14)
-    signals["rsi"] = rsi_val
-    if rsi_val is not None:
-        if rsi_val >= 30 and len(closes) >= 2:
-            prev_rsi = rsi(closes[:-1], 14)
-            if prev_rsi is not None and prev_rsi < 30:
-                b += 2
-                tags.append("RSI 과매도 탈출")
-        elif rsi_val < 30:
-            b += 1
-
-    # RSI 상승 다이버전스 (+2)
-    if _rsi_bullish_divergence(closes):
-        b += 2
-        tags.append("RSI 상승 다이버전스")
-
-    # 스토캐스틱 과매도 탈출 (+2)
-    sk, sd = stochastic(highs, lows, closes, 14, 3)
-    signals.update({"stoch_k": sk, "stoch_d": sd})
-    if sk is not None and sd is not None:
-        if sk >= 20:
-            pk, pd = stochastic(highs[:-1], lows[:-1], closes[:-1], 14, 3)
-            if pk is not None and pk < 20:
-                b += 2
-                tags.append("스토캐스틱 과매도 탈출")
-        elif sk < 20:
-            b += 1
-
-    # CCI 과매도 탈출 (+2)
-    cci_val = cci(highs, lows, closes, 20)
-    signals["cci"] = cci_val
-    if cci_val is not None:
-        if cci_val >= -100 and len(highs) >= 2:
-            prev_cci = cci(highs[:-1], lows[:-1], closes[:-1], 20)
-            if prev_cci is not None and prev_cci < -100:
-                b += 2
-                tags.append("CCI 과매도 탈출")
-
-    # MFI 과매도 탈출 (+2)
-    mfi_val = mfi(highs, lows, closes, volumes, 14)
-    signals["mfi"] = mfi_val
-    if mfi_val is not None:
-        if mfi_val >= 20 and len(highs) >= 2:
-            prev_mfi = mfi(highs[:-1], lows[:-1], closes[:-1], volumes[:-1], 14)
-            if prev_mfi is not None and prev_mfi < 20:
-                b += 2
-                tags.append("MFI 과매도 탈출")
-        elif mfi_val < 20:
-            b += 1
-
-    b = min(b, 10)
-
-    # ── C. 변동성/가격패턴 (max 10) ──────────────────────────────────────────
-    c = 0
-
     atr_val = atr(highs, lows, closes, 14)
-    signals["atr"] = atr_val
 
-    bb = bollinger(closes, 20, 2.0)
-    if bb is not None:
-        bbu, bbm, bbl = bb
-        bandwidth = (bbu - bbl) / bbm * 100 if bbm != 0 else 0
-        signals.update({"bb_upper": bbu, "bb_lower": bbl, "bb_bandwidth": round(bandwidth, 2)})
-        # 볼린저 하단 근접 (+2)
-        if cur <= bbl * 1.02:
-            c += 2
-            tags.append("볼린저 하단 근접")
-        # 볼린저 스퀴즈 + 상단 돌파 (+2)
-        if bandwidth < 10 and cur >= bbu:
-            c += 2
-            tags.append("볼린저 스퀴즈 상단돌파")
+    # ── Stage 2: Dual Engine ──────────────────────────────────────────────────
+    score_a, tags_a = _engine_a(
+        closes, highs, lows, volumes, cur,
+        ma5, ma20, ma60, rsi_val, vol_ma20, cloud_position,
+    )
+    score_b, tags_b = _engine_b(
+        closes, highs, lows, volumes, cur,
+        ma5, ma20, rsi_val,
+    )
+
+    if score_a >= score_b:
+        engine, score, tags = "A", score_a, tags_a
     else:
-        signals.update({"bb_upper": None, "bb_lower": None, "bb_bandwidth": None})
+        engine, score, tags = "B", score_b, tags_b
 
-    # 엔벨로프 하단지지 + 양봉 (+2)
-    env = envelope(closes, 20, 0.05)
-    if env is not None:
-        env_u, _, env_l = env
-        signals.update({"env_upper": env_u, "env_lower": env_l})
-        if cur <= env_l * 1.01 and len(closes) >= 2 and closes[-1] > closes[-2]:
-            c += 2
-            tags.append("엔벨로프 하단지지")
-    else:
-        signals.update({"env_upper": None, "env_lower": None})
-
-    # 피봇 S2 반등 (+2)
-    if len(highs) >= 2:
-        piv = pivot_point(highs[-2], lows[-2], closes[-2])
-        signals["pivot_s2"] = piv["s2"]
-        if piv["s2"] * 0.99 <= cur <= piv["s2"] * 1.05 and len(closes) >= 2 and closes[-1] > closes[-2]:
-            c += 2
-            tags.append("피봇 2차지지")
-    else:
-        signals["pivot_s2"] = None
-
-    # 전고점 돌파 + 거래량 (+2)
-    if len(highs) >= 22:
-        recent_h = max(highs[-21:-1])
-        vol_ma = sma(volumes, 20)
-        if vol_ma and vol_ma > 0 and cur > recent_h and volumes[-1] > vol_ma * 1.5:
-            c += 2
-            tags.append("전고점 돌파")
-
-    # 피보나치 되돌림 지지 (+1 or +2)
-    fib = fibonacci_support(highs, lows, closes)
-    signals["fib_level"] = fib["level"]
-    signals["fib_ratio"] = fib["ratio"]
-    signals["fib_reason"] = fib["reason"]
-    if fib["near"]:
-        if fib["ratio"] == 0.618:
-            c += 2
-            tags.append("피보나치 61.8% 지지")
-        else:
-            c += 1
-            tags.append(f"피보나치 {round(fib['ratio'] * 100, 1)}% 지지")
-
-    # 눌림목 반등 (+2)
-    if ma20 is not None and len(closes) >= 10 and cur > ma20:
-        uptrend = True
-        for i in range(1, 6):
-            if len(closes) < i + 20:
-                uptrend = False
-                break
-            if (sma(closes[:-i], 5) or 0) <= (sma(closes[:-i], 20) or 0):
-                uptrend = False
-                break
-        if uptrend and any(abs(l - ma20) / ma20 < 0.02 for l in lows[-5:]):
-            c += 2
-            tags.append("눌림목 반등")
-
-    c = min(c, 10)
-
-    # ── D. 거래량/매집 (max 10) ──────────────────────────────────────────────
-    d = 0
-
-    obv_s = obv_series(closes, volumes)
-    signals["obv"] = obv_s[-1] if obv_s else None
-
-    # OBV 상승추세 (+1, no tag)
-    if len(obv_s) >= 10:
-        if sum(obv_s[-5:]) / 5 > sum(obv_s[-10:]) / 10:
-            d += 1
-
-    # OBV 선행 돌파 (+2)
-    if len(obv_s) >= 21 and len(highs) >= 21:
-        obv_high = max(obv_s[-21:-1])
-        price_high = max(highs[-21:-1])
-        if obv_s[-1] > obv_high and cur <= price_high:
-            d += 2
-            tags.append("OBV 선행 돌파")
-        elif obv_s[-1] > obv_high:
-            d += 1
-
-    # 거래량 급증 (+2)
-    vol_ma20 = sma(volumes, 20)
-    signals["volume_ma20"] = vol_ma20
-    vol_ratio_val = None
-    if vol_ma20 and vol_ma20 > 0:
-        vol_ratio_val = round(volumes[-1] / vol_ma20, 2)
-        signals["volume_ratio"] = vol_ratio_val
-        if vol_ratio_val >= 2.0 and len(closes) >= 2 and closes[-1] > closes[-2]:
-            d += 2
-            tags.append("거래량 급증")
-    else:
-        signals["volume_ratio"] = None
-
-    # VR 과매도 반등 (+2, no tag)
-    vr = volume_ratio(closes, volumes, 20)
-    signals["vr"] = round(vr, 1) if vr is not None else None
-    if vr is not None and vr < 70:
-        d += 2
-
-    # Chaikin 0선 돌파 (+2)
-    ch = chaikin_osc(highs, lows, closes, volumes)
-    signals["chaikin_osc"] = ch
-    if ch is not None and len(highs) >= 2:
-        prev_ch = chaikin_osc(highs[:-1], lows[:-1], closes[:-1], volumes[:-1])
-        if prev_ch is not None and prev_ch <= 0 and ch > 0:
-            d += 2
-            tags.append("Chaikin 0선돌파")
-        elif ch > 0 and prev_ch is None:
-            d += 1
-
-    d = min(d, 10)
-
-    # ── Final ─────────────────────────────────────────────────────────────────
-    # Normalize 0-40 → 0-100
-    total = a + b + c + d
-    score = round(total * 2.5)
     strength = (
         "매우 강함" if score >= 75 else
         "강함"     if score >= 50 else
@@ -712,7 +640,16 @@ def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
     return {
         "score": score,
         "tags": tags,
-        "signals": signals,
-        "score_detail": {"trend": a, "momentum": b, "volatility": c, "volume": d},
+        "signals": {
+            "ma5": ma5, "ma20": ma20, "ma60": ma60,
+            "rsi": round(rsi_val, 1) if rsi_val is not None else None,
+            "atr": atr_val,
+            "volume_ma20": round(vol_ma20, 0),
+            "cloud_position": cloud_position,
+        },
+        "engine": engine,
+        "engine_a_score": score_a,
+        "engine_b_score": score_b,
+        "score_detail": {"engine_a": score_a, "engine_b": score_b},
         "strength": strength,
     }

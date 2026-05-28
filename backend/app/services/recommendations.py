@@ -75,18 +75,6 @@ def _db_rows_to_ohlcv(db_rows: list[dict]) -> list[dict]:
     ]
 
 
-def _is_bearish_alignment(records: list[dict]) -> bool:
-    """역배열 판별: MA5 < MA20 이면 True (탈락)."""
-    closes = [float(r.get("stck_clpr") or 0) for r in records]
-    if len(closes) < 20:
-        return True
-    ma5  = technical.sma(closes, 5)
-    ma20 = technical.sma(closes, 20)
-    if ma5 is None or ma20 is None:
-        return True
-    return ma5 < ma20
-
-
 # ── OHLCV 캐시 보완 ────────────────────────────────────────────────────────────
 
 async def _load_cached_ohlcv(codes: list[str], start_date_iso: str) -> dict[str, list[dict]]:
@@ -262,15 +250,11 @@ async def update_recommendations() -> list[dict]:
         if full_fetch:
             logger.info(f"OHLCV 전체 조회(캐시 미비): {len(full_fetch)}개")
 
-    # ── 3. 역배열 탈락 → 최대 30개 압축 ─────────────────────────────────────
-    valid_codes: list[str] = []
-    for code in codes:
-        records = _db_rows_to_ohlcv(cached[code])
-        if not _is_bearish_alignment(records):
-            valid_codes.append(code)
-        if len(valid_codes) >= 30:
-            break
-    logger.info(f"역배열 필터링: {len(codes)}개 → {len(valid_codes)}개")
+    # ── 3. 분석 대상 압축 (최대 30개) ────────────────────────────────────────
+    # 역배열 사전 필터 제거: Engine B(역추세)는 MA5<MA20 구간 종목을 포착하므로
+    # 하드 필터(거래량 MA20)는 technical.analyze() 내부에서 처리
+    valid_codes = codes[:30]
+    logger.info(f"분석 대상: {len(valid_codes)}개")
 
     # ── 4. 기술적 점수 산출 (일목 구름대 포함) ──────────────────────────────
     def _analyze_with_ichimoku(code: str) -> dict:
@@ -313,6 +297,11 @@ async def update_recommendations() -> list[dict]:
         w52_hgpr     = _to_float(item.get("w52_hgpr") or 0)
 
         tags = list(ta["tags"])
+        engine_label = ta.get("engine")
+        if engine_label == "A":
+            tags.append("추세 돌파형")
+        elif engine_label == "B":
+            tags.append("역추세 반등형")
         if change_rate >= 3.0:
             tags.append("등락률 급등")
         if w52_hgpr > 0 and current_price >= w52_hgpr * 0.95:
