@@ -7,6 +7,8 @@
 - 반환: pandas DataFrame (문자열 → float 정제 포함)
 """
 
+from __future__ import annotations
+
 import asyncio
 import io
 import logging
