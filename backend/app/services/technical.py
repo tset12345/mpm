@@ -283,6 +283,76 @@ def pivot_point(high: float, low: float, close: float) -> dict:
     }
 
 
+def fibonacci_support(
+    highs: list[float], lows: list[float], closes: list[float],
+    n: int = 3, tolerance: float = 0.02
+) -> dict:
+    """
+    Fibonacci retracement support detection.
+    Finds the most recent swing low→high, computes 38.2%/50%/61.8% retracement levels,
+    and checks whether the current price is near any of them (within ±tolerance).
+    Returns {"level": float|None, "ratio": float|None, "near": bool, "reason": str|None}.
+    reason is set when near=False to explain why no level matched.
+    """
+    def _no(reason: str) -> dict:
+        return {"level": None, "ratio": None, "near": False, "reason": reason}
+
+    min_len = 2 * n + 5
+    if len(closes) < min_len:
+        return _no("데이터 부족")
+
+    search_end = len(closes) - n
+    swing_highs: list[tuple[int, float]] = []
+    swing_lows: list[tuple[int, float]] = []
+    for i in range(n, search_end):
+        if highs[i] == max(highs[i - n: i + n + 1]):
+            swing_highs.append((i, highs[i]))
+        if lows[i] == min(lows[i - n: i + n + 1]):
+            swing_lows.append((i, lows[i]))
+
+    if not swing_highs or not swing_lows:
+        return _no("스윙 감지 불가")
+
+    # Most recent valid swing pair (range ≥ 3%) — iterate newest-first
+    sh_idx = sh_price = sl_idx = sl_price = None
+    for _sh_idx, _sh_price in reversed(swing_highs):
+        preceding = [(i, p) for i, p in swing_lows if i < _sh_idx]
+        if not preceding:
+            continue
+        _sl_idx, _sl_price = preceding[-1]
+        _range = _sh_price - _sl_price
+        if _range > 0 and _range / _sl_price >= 0.03:
+            sh_idx, sh_price = _sh_idx, _sh_price
+            sl_idx, sl_price = _sl_idx, _sl_price
+            break
+
+    if sh_idx is None:
+        return _no("유효 스윙 없음")
+
+    swing_range = sh_price - sl_price
+
+    cur = closes[-1]
+    l382 = sh_price - 0.382 * swing_range
+    l500 = sh_price - 0.500 * swing_range
+    l618 = sh_price - 0.618 * swing_range
+
+    for ratio, level in [(0.382, l382), (0.500, l500), (0.618, l618)]:
+        if abs(cur - level) / level <= tolerance:
+            return {"level": round(level, 0), "ratio": ratio, "near": True, "reason": None}
+
+    def _fmt(v: float) -> str:
+        return f"{int(round(v)):,}"
+
+    if cur > l382:
+        return _no(f"되돌림 전 · 38.2%={_fmt(l382)}")
+    elif cur < l618:
+        return _no(f"61.8% 이탈 · 기준={_fmt(l618)}")
+    elif cur > l500:
+        return _no(f"38.2%~50% 구간 ({_fmt(l382)}~{_fmt(l500)})")
+    else:
+        return _no(f"50%~61.8% 구간 ({_fmt(l500)}~{_fmt(l618)})")
+
+
 def volume_ratio(closes: list[float], volumes: list[float], period: int = 20) -> float | None:
     """
     Volume Ratio (VR) = (up_vol + 0.5*flat_vol) / (down_vol + 0.5*flat_vol) × 100.
@@ -545,6 +615,19 @@ def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
         if vol_ma and vol_ma > 0 and cur > recent_h and volumes[-1] > vol_ma * 1.5:
             c += 2
             tags.append("전고점 돌파")
+
+    # 피보나치 되돌림 지지 (+1 or +2)
+    fib = fibonacci_support(highs, lows, closes)
+    signals["fib_level"] = fib["level"]
+    signals["fib_ratio"] = fib["ratio"]
+    signals["fib_reason"] = fib["reason"]
+    if fib["near"]:
+        if fib["ratio"] == 0.618:
+            c += 2
+            tags.append("피보나치 61.8% 지지")
+        else:
+            c += 1
+            tags.append(f"피보나치 {round(fib['ratio'] * 100, 1)}% 지지")
 
     # 눌림목 반등 (+2)
     if ma20 is not None and len(closes) >= 10 and cur > ma20:

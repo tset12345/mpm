@@ -762,6 +762,20 @@ export default function StockDetailPage({ params }: { params: { code: string } }
             <span className="font-mono text-gray-700">{fmt(signals.pivot_s2)}</span>
           </div>
 
+          <div className="flex justify-between items-center border-b pb-2">
+            <span className="text-gray-500">피보나치 지지</span>
+            {signals.fib_level != null && signals.fib_ratio != null ? (
+              <span className={`font-mono font-semibold ${signals.fib_ratio === 0.618 ? "text-purple-600" : "text-indigo-500"}`}>
+                {fmt(signals.fib_level)}
+                <span className="text-xs font-normal ml-1">({(signals.fib_ratio * 100).toFixed(1)}% 되돌림)</span>
+              </span>
+            ) : (
+              <span className="text-gray-400 font-mono text-xs">
+                {signals.fib_reason ?? "해당 없음"}
+              </span>
+            )}
+          </div>
+
           {/* D. 거래량 */}
           <div className="sm:col-span-2 text-xs font-semibold text-orange-500 uppercase tracking-wide pt-2">D. 거래량 / 매집</div>
 

@@ -44,6 +44,9 @@ export interface TechnicalSignals {
   env_upper: number | null;
   env_lower: number | null;
   pivot_s2: number | null;
+  fib_level: number | null;
+  fib_ratio: number | null;
+  fib_reason: string | null;
 }
 
 export interface PriceInfo {
