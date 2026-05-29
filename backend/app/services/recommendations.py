@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from collections import defaultdict
 from datetime import timedelta, datetime, timezone
@@ -14,12 +13,9 @@ from app.services.ichimoku import calculate as ichimoku_calculate
 logger = logging.getLogger(__name__)
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
-MEANINGFUL_SCORE_THRESHOLD = 20   # tech + fund 합산 최소 점수
+MEANINGFUL_SCORE_THRESHOLD = 20   # 기술 점수 최소 임계값
 MIN_PRICE = 1_000                  # 동전주 필터링 기준 (원)
 TOP_N = 10                         # 최종 추천 종목 수
-FUND_TARGET_PTS = 15               # AI 리포트 주요 종목 언급 점수
-FUND_RELATED_PTS = 5               # AI 리포트 관련 종목 언급 점수
-FUND_MAX = 30                      # 펀더멘털 점수 상한
 
 FALLBACK_STOCKS = [
     ("005930", "삼성전자",  74200),
@@ -127,38 +123,6 @@ async def _fetch_ohlcv_range(
         except Exception as e:
             logger.debug(f"{code} OHLCV 조회 실패({start_kis}~{end_kis}): {e}")
         return code, []
-
-
-# ── 펀더멘털 점수 ──────────────────────────────────────────────────────────────
-
-def _load_fund_scores(codes: list[str]) -> dict[str, int]:
-    """최근 7일 AI 리포트에서 종목별 긍정 점수 산출."""
-    fund: dict[str, int] = {code: 0 for code in codes}
-    since = (today_kst() - timedelta(days=7)).isoformat()
-    try:
-        rows = (
-            supabase.table("reports")
-            .select("target_stock_code,related_stock_codes")
-            .gte("publish_date", since)
-            .execute()
-        )
-        for r in (rows.data or []):
-            tc = r.get("target_stock_code")
-            if tc and tc in fund:
-                fund[tc] = min(fund[tc] + FUND_TARGET_PTS, FUND_MAX)
-
-            related = r.get("related_stock_codes") or []
-            if isinstance(related, str):
-                try:
-                    related = json.loads(related)
-                except Exception:
-                    related = []
-            for rc in (related if isinstance(related, list) else []):
-                if rc in fund:
-                    fund[rc] = min(fund[rc] + FUND_RELATED_PTS, FUND_MAX)
-    except Exception as e:
-        logger.warning(f"AI 리포트 점수 조회 실패: {e}")
-    return fund
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -273,28 +237,23 @@ async def update_recommendations() -> list[dict]:
         for code in valid_codes
     }
 
-    # ── 5. 펀더멘털 점수 (최근 7일 AI 리포트) ────────────────────────────────
-    fund_map = _load_fund_scores(valid_codes)
-
-    # ── 6. 합산 점수 → Top N 선정 ────────────────────────────────────────────
+    # ── 5. 기술 점수 → Top N 선정 ────────────────────────────────────────────
     scored = sorted(
         valid_codes,
-        key=lambda c: tech_map[c]["score"] + fund_map[c],
+        key=lambda c: tech_map[c]["score"],
         reverse=True,
     )
-    top = [c for c in scored if (tech_map[c]["score"] + fund_map[c]) >= MEANINGFUL_SCORE_THRESHOLD][:TOP_N]
+    top = [c for c in scored if tech_map[c]["score"] >= MEANINGFUL_SCORE_THRESHOLD][:TOP_N]
     logger.info(f"최종 추천: {len(top)}개 (임계값 {MEANINGFUL_SCORE_THRESHOLD}점 이상, Top {TOP_N})")
 
-    # ── 7. 행 조립 ────────────────────────────────────────────────────────────
+    # ── 6. 행 조립 ────────────────────────────────────────────────────────────
     rows: list[dict] = []
     for code in top:
-        item         = rank_map[code]
-        ta           = tech_map[code]
-        fs           = fund_map[code]
-        total        = ta["score"] + fs
+        item          = rank_map[code]
+        ta            = tech_map[code]
         current_price = _to_int(item.get("stck_prpr") or item.get("stck_clpr"))
-        change_rate  = _to_float(item.get("prdy_ctrt"))
-        w52_hgpr     = _to_float(item.get("w52_hgpr") or 0)
+        change_rate   = _to_float(item.get("prdy_ctrt"))
+        w52_hgpr      = _to_float(item.get("w52_hgpr") or 0)
 
         tags = list(ta["tags"])
         engine_label = ta.get("engine")
@@ -306,8 +265,6 @@ async def update_recommendations() -> list[dict]:
             tags.append("등락률 급등")
         if w52_hgpr > 0 and current_price >= w52_hgpr * 0.95:
             tags.append("52주 신고가 근접")
-        if fs > 0:
-            tags.append("리포트 언급")
 
         rows.append({
             "date":              today_str,
@@ -318,8 +275,7 @@ async def update_recommendations() -> list[dict]:
             "volume":            _to_int(item.get("acml_vol")),
             "tags":              tags,
             "tech_score":        ta["score"],
-            "fund_score":        fs,
-            "total_score":       total,
+            "total_score":       ta["score"],
             "engine_a_score":    ta.get("engine_a_score", 0),
             "engine_b_score":    ta.get("engine_b_score", 0),
             "source_conditions": sorted(source_map.get(code, set())),
@@ -376,7 +332,7 @@ def _make_fallback_rows(today_str: str) -> list[dict]:
         {
             "date": today_str, "stock_code": code, "stock_name": name,
             "current_price": price, "change_rate": 0.0, "volume": 0,
-            "tags": ["폴백 데이터"], "tech_score": 0, "fund_score": 0, "total_score": 0,
+            "tags": ["폴백 데이터"], "tech_score": 0, "total_score": 0,
             "engine_a_score": 0, "engine_b_score": 0,
         }
         for code, name, price in FALLBACK_STOCKS

@@ -6,30 +6,16 @@ import { StockSummary, StockMaster, SectorLeaderStock } from "@/lib/types";
 import { useFavorites } from "@/hooks/useFavorites";
 import { RefreshCw, Search, Star, X, TrendingUp } from "lucide-react";
 
-function ScoreBadge({ tech, fund, total }: { tech?: number; fund?: number; total?: number }) {
-  const display = total ?? tech;
-  if (display == null) return null;
+function ScoreBadge({ score }: { score?: number }) {
+  if (score == null) return null;
   const color =
-    display >= 75 ? "bg-red-100 text-red-700" :
-    display >= 50 ? "bg-orange-100 text-orange-700" :
-    display >= 25 ? "bg-yellow-100 text-yellow-700" :
+    score >= 75 ? "bg-red-100 text-red-700" :
+    score >= 50 ? "bg-orange-100 text-orange-700" :
+    score >= 25 ? "bg-yellow-100 text-yellow-700" :
     "bg-gray-100 text-gray-500";
-
-  const hasFund = fund != null && fund > 0;
-  const tooltip = hasFund
-    ? `기술 ${tech ?? 0}점 + 리포트 ${fund}점 = 합산 ${total ?? display}점`
-    : `기술 점수 ${display}점`;
-
   return (
-    <span className="inline-flex items-center gap-1" title={tooltip}>
-      <span className={`text-xs font-bold px-2 py-0.5 rounded font-mono ${color}`}>
-        {display}
-      </span>
-      {hasFund && (
-        <span className="text-xs text-emerald-600 font-semibold" title={`리포트 +${fund}점`}>
-          +{fund}📄
-        </span>
-      )}
+    <span className={`text-xs font-bold px-2 py-0.5 rounded font-mono ${color}`} title={`기술 점수 ${score}점`}>
+      {score}
     </span>
   );
 }
@@ -344,7 +330,7 @@ export default function StocksPage() {
                 <td className="px-4 py-3 text-right font-mono text-gray-500">{s.volume?.toLocaleString() ?? "-"}</td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex flex-col items-end gap-1">
-                    <ScoreBadge tech={s.tech_score} fund={s.fund_score} total={s.total_score} />
+                    <ScoreBadge score={s.total_score ?? s.tech_score} />
                     <EngineBadge tags={s.tags} />
                     {((s.engine_a_score ?? 0) > 0 || (s.engine_b_score ?? 0) > 0) && (
                       <div className="flex items-center gap-1 text-[10px] font-mono">

@@ -6,7 +6,6 @@ export interface StockSummary {
   volume: number | null;
   tags: string[];
   tech_score?: number;
-  fund_score?: number;
   total_score?: number;
   date?: string;
   consecutive_days?: number;

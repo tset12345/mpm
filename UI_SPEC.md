@@ -84,7 +84,6 @@
 | 엔진 배지 (B) | `text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700` | `↩ 역추세` |
 | 소스 배지 | `text-[10px] font-semibold px-1.5 py-0.5 rounded` + 조건별 색상 | `거래대금` |
 | 점수 배지 | `text-xs font-bold px-2 py-0.5 rounded font-mono` + 점수별 색상 | `82` |
-| 리포트 보너스 | `text-xs text-emerald-600 font-semibold` | `+5📄` |
 | 연속 배지 | `text-xs font-semibold px-1.5 py-0.5 rounded` + 일수별 색상 | `🔁 3일` |
 | 종목코드 배지 | `text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded` | `005930` |
 | KOSPI 배지 | `text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded` | `KOSPI` |

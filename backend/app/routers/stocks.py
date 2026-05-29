@@ -161,7 +161,7 @@ async def get_recommendations():
                 ta = fresh.get(row["stock_code"])
                 if ta:
                     row["tech_score"]  = ta["score"]
-                    row["total_score"] = ta["score"] + (row.get("fund_score") or 0)
+                    row["total_score"] = ta["score"]
                     row["tags"]        = ta["tags"]
         except Exception as e:
             logger.warning(f"기술 점수 재계산 실패(저장값 사용): {e}")
