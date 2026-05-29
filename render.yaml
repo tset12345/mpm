@@ -31,3 +31,5 @@ services:
         sync: false
       - key: ENABLE_SCHEDULER
         value: "true"
+      - key: PYTHON_VERSION
+        value: "3.11.6"
