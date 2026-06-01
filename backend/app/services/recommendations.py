@@ -17,19 +17,6 @@ MEANINGFUL_SCORE_THRESHOLD = 20   # 기술 점수 최소 임계값
 MIN_PRICE = 1_000                  # 동전주 필터링 기준 (원)
 TOP_N = 10                         # 최종 추천 종목 수
 
-FALLBACK_STOCKS = [
-    ("005930", "삼성전자",  74200),
-    ("000660", "SK하이닉스", 195000),
-    ("035420", "NAVER",    185000),
-    ("005380", "현대차",   215000),
-    ("000270", "기아",      97000),
-    ("068270", "셀트리온",  182000),
-    ("051910", "LG화학",   285000),
-    ("035720", "카카오",    38000),
-    ("105560", "KB금융",    89000),
-    ("055550", "신한지주",  55000),
-]
-
 _ETF_NAME_KEYWORDS = {
     "KODEX", "TIGER", "KINDEX", "KOSEF", "HANARO", "RISE", "ACE", "SOL",
     "TIMEFOLIO", "ARIRANG", "TREX", "PLUS", "레버리지", "인버스", "2X", "TOP10",
@@ -181,10 +168,8 @@ async def update_recommendations() -> list[dict]:
         logger.info(f"{log_label}: {added}개 신규 추가 (누적 {len(rank_map)}개)")
 
     if not rank_map:
-        logger.warning("모든 수급 조건 실패, 폴백 사용")
-        rows = _make_fallback_rows(today_str)
-        _upsert_rows(rows)
-        return rows
+        logger.warning("모든 수급 조건 실패, 빈 결과 반환")
+        return []
 
     codes = list(rank_map.keys())
 
@@ -325,15 +310,3 @@ def _upsert_rows(rows: list[dict]) -> None:
     except Exception as e:
         logger.error(f"추천 종목 저장 실패: {e}")
         raise
-
-
-def _make_fallback_rows(today_str: str) -> list[dict]:
-    return [
-        {
-            "date": today_str, "stock_code": code, "stock_name": name,
-            "current_price": price, "change_rate": 0.0, "volume": 0,
-            "tags": ["폴백 데이터"], "tech_score": 0, "total_score": 0,
-            "engine_a_score": 0, "engine_b_score": 0,
-        }
-        for code, name, price in FALLBACK_STOCKS
-    ]
