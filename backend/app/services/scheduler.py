@@ -9,16 +9,19 @@ scheduler = AsyncIOScheduler()
 
 
 async def run_daily_sync():
-    """장 마감 후 실행: 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장"""
+    """장 마감 후 실행: 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장 + 가상 거래 트리거"""
     from app.services.recommendations import update_recommendations
     from app.services.ohlcv_sync import sync_ohlcv
     from app.services.history import save_snapshot
+    from app.services.virtual_trading import virtual_buy_trigger, virtual_sell_trigger
     logger.info("일일 데이터 동기화 시작")
     try:
         stocks = await update_recommendations()
         codes = [s["stock_code"] for s in stocks]
         await sync_ohlcv(codes)
         save_snapshot(stocks)
+        virtual_sell_trigger()
+        virtual_buy_trigger(stocks)
         logger.info("일일 데이터 동기화 완료")
     except Exception as e:
         logger.error(f"일일 동기화 실패: {e}")

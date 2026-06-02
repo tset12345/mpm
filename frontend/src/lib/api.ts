@@ -131,4 +131,48 @@ export const api = {
   removeFavorite: (stock_code: string) =>
     fetchAPI<{ status: string }>(`/api/v1/stocks/favorites/${stock_code}`, { method: "DELETE" }),
 
+  // 가상 거래
+  getVirtualAccounts: (profile_id?: number | null) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualAccount[] }>(
+      profile_id != null ? `/api/v1/virtual/accounts?profile_id=${profile_id}` : "/api/v1/virtual/accounts"
+    ),
+
+  createVirtualAccount: (body: {
+    name?: string; initial_cash?: number; strategy?: string;
+    min_score?: number; max_positions?: number; position_size?: number;
+    stop_loss_pct?: number; take_profit_pct?: number; profile_id?: number | null;
+  }) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualAccount }>("/api/v1/virtual/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  updateVirtualAccount: (id: number, body: Partial<import("./types").VirtualAccount>) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualAccount }>(`/api/v1/virtual/accounts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  deleteVirtualAccount: (id: number) =>
+    fetchAPI<{ status: string }>(`/api/v1/virtual/accounts/${id}`, { method: "DELETE" }),
+
+  getVirtualPositions: (account_id: number) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualPosition[] }>(`/api/v1/virtual/accounts/${account_id}/positions`),
+
+  getVirtualTrades: (account_id: number) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualTrade[] }>(`/api/v1/virtual/accounts/${account_id}/trades`),
+
+  getVirtualPerformance: (account_id: number) =>
+    fetchAPI<{ status: string; data: import("./types").VirtualPerformance }>(`/api/v1/virtual/accounts/${account_id}/performance`),
+
+  manualVirtualTrade: (account_id: number, body: {
+    side: "buy" | "sell"; stock_code: string; stock_name: string; price: number; quantity?: number;
+  }) =>
+    fetchAPI<{ status: string; data: unknown }>(`/api/v1/virtual/accounts/${account_id}/trades`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };

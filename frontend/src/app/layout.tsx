@@ -22,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/stocks" className="text-sm text-gray-600 hover:text-gray-900">종목</Link>
               <Link href="/stocks/history" className="text-sm text-gray-600 hover:text-gray-900">히스토리</Link>
               <Link href="/portfolio" className="text-sm text-gray-600 hover:text-gray-900">포트폴리오</Link>
+              <Link href="/virtual" className="text-sm text-gray-600 hover:text-gray-900">가상거래</Link>
             </div>
           </nav>
           <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>

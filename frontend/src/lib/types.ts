@@ -256,6 +256,73 @@ export interface StockMaster {
   market: "KOSPI" | "KOSDAQ";
 }
 
+export interface VirtualAccount {
+  id: number;
+  profile_id: number | null;
+  name: string;
+  initial_cash: number;
+  current_cash: number;
+  strategy: "engine_a" | "engine_b" | "both";
+  min_score: number;
+  max_positions: number;
+  position_size: number;
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface VirtualPosition {
+  id: number;
+  account_id: number;
+  stock_code: string;
+  stock_name: string;
+  quantity: number;
+  avg_price: number;
+  entry_date: string;
+  entry_score: number | null;
+  engine: "A" | "B" | null;
+  current_price: number | null;
+  profit_loss: number | null;
+  profit_rate: number | null;
+  hold_days: number | null;
+}
+
+export interface VirtualTrade {
+  id: number;
+  account_id: number;
+  stock_code: string;
+  stock_name: string;
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+  amount: number;
+  trigger_type: "algo_buy" | "stop_loss" | "take_profit" | "sell_signal" | "manual";
+  engine: "A" | "B" | null;
+  tech_score: number | null;
+  sell_score: number | null;
+  pnl: number | null;
+  pnl_rate: number | null;
+  memo: string | null;
+  traded_at: string;
+  created_at: string;
+}
+
+export interface VirtualPerformance {
+  initial_cash: number;
+  current_cash: number;
+  position_value: number;
+  total_value: number;
+  total_return_rate: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  win_rate: number | null;
+  trade_count: number;
+  sell_count: number;
+  avg_hold_days: number | null;
+  max_drawdown: number | null;
+}
+
 export interface SectorLeaderStock {
   rank: number;
   stock_code: string;
