@@ -275,6 +275,16 @@ def virtual_buy_trigger(recommendations: list[dict]) -> None:
 def _process_buy_for_account(account: dict, recommendations: list[dict]) -> None:
     positions_res = supabase.table("virtual_positions").select("stock_code").eq("account_id", account["id"]).execute()
     held_codes = {p["stock_code"] for p in (positions_res.data or [])}
+
+    # 당일 손절된 종목은 재매수 금지
+    today_str = _today().isoformat()
+    stoploss_res = (supabase.table("virtual_trades")
+                   .select("stock_code")
+                   .eq("account_id", account["id"])
+                   .eq("trigger_type", "stop_loss")
+                   .eq("traded_at", today_str)
+                   .execute())
+    held_codes |= {r["stock_code"] for r in (stoploss_res.data or [])}
     current_positions = len(held_codes)
 
     strategy    = account["strategy"]
@@ -394,7 +404,7 @@ def _process_sell_for_account(account: dict, price_map: dict[str, int]) -> None:
             result = analyze_sell(records=fmt, avg_price=avg_price, current_price=price)
             sell_score = result.get("sell_score", 0)
 
-            if sell_score >= 65:
+            if sell_score > 65:
                 account = get_account(account["id"])
                 _execute_sell(account, pos, price, "sell_signal", sell_score)
         except Exception as e:
