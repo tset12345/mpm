@@ -67,27 +67,49 @@ def get_positions(account_id: int) -> list[dict]:
     res = supabase.table("virtual_positions").select("*").eq("account_id", account_id).order("entry_date").execute()
     positions = res.data or []
 
-    # 추천 테이블에서 최신 가격 보완
+    # 현재가 보완: ① stock_recommendations → ② stock_ohlcv 폴백
     if positions:
         codes = [p["stock_code"] for p in positions]
+        price_map: dict[str, int] = {}
+        price_date_map: dict[str, str] = {}
         try:
+            # ① 추천 테이블 (오늘 추천에 포함된 종목)
             latest_date_res = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
             if latest_date_res.data:
                 latest_date = latest_date_res.data[0]["date"]
                 price_res = supabase.table("stock_recommendations").select("stock_code,current_price").eq("date", latest_date).in_("stock_code", codes).execute()
-                price_map = {r["stock_code"]: r["current_price"] for r in (price_res.data or [])}
-                for p in positions:
-                    cp = price_map.get(p["stock_code"])
-                    p["current_price"] = cp
-                    if cp:
-                        p["profit_loss"] = (cp - p["avg_price"]) * p["quantity"]
-                        p["profit_rate"] = round((cp - p["avg_price"]) / p["avg_price"] * 100, 2)
-                        p["hold_days"] = (date.fromisoformat(latest_date) - date.fromisoformat(p["entry_date"])).days
-                    else:
-                        p["current_price"] = None
-                        p["profit_loss"] = None
-                        p["profit_rate"] = None
-                        p["hold_days"] = None
+                for r in (price_res.data or []):
+                    if r.get("current_price"):
+                        price_map[r["stock_code"]] = r["current_price"]
+                        price_date_map[r["stock_code"]] = latest_date
+
+            # ② OHLCV 폴백 — 추천 테이블에 없는 종목
+            missing = [c for c in codes if c not in price_map]
+            if missing:
+                for code in missing:
+                    ohlcv_res = (supabase.table("stock_ohlcv")
+                                 .select("trade_date,close_price")
+                                 .eq("stock_code", code)
+                                 .order("trade_date", desc=True)
+                                 .limit(1)
+                                 .execute())
+                    if ohlcv_res.data:
+                        row = ohlcv_res.data[0]
+                        price_map[code] = int(row["close_price"])
+                        price_date_map[code] = row["trade_date"]
+
+            for p in positions:
+                cp = price_map.get(p["stock_code"])
+                pd = price_date_map.get(p["stock_code"])
+                p["current_price"] = cp
+                if cp:
+                    p["profit_loss"] = (cp - p["avg_price"]) * p["quantity"]
+                    p["profit_rate"] = round((cp - p["avg_price"]) / p["avg_price"] * 100, 2)
+                    p["hold_days"] = (date.fromisoformat(pd) - date.fromisoformat(p["entry_date"])).days if pd else None
+                else:
+                    p["profit_loss"] = None
+                    p["profit_rate"] = None
+                    p["hold_days"] = None
         except Exception as e:
             logger.warning(f"포지션 현재가 보완 실패: {e}")
             for p in positions:
@@ -334,23 +356,24 @@ def _process_buy_for_account(account: dict, recommendations: list[dict]) -> None
             account["current_cash"] -= result["amount"]
 
 
-def virtual_sell_trigger() -> None:
-    """스케줄러 동기화 후 호출 — 손절·익절·매도신호 자동 체결."""
+def virtual_sell_trigger(price_map: dict[str, int] | None = None) -> None:
+    """손절·익절·매도신호 자동 체결. price_map이 주어지면 DB 조회 없이 사용."""
     accounts = [a for a in list_accounts() if a["is_active"]]
     if not accounts:
         return
 
-    # 최신 추천 가격 조회
-    price_map: dict[str, int] = {}
-    try:
-        latest_res = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
-        if latest_res.data:
-            latest_date = latest_res.data[0]["date"]
-            rows = supabase.table("stock_recommendations").select("stock_code,current_price").eq("date", latest_date).execute()
-            price_map = {r["stock_code"]: r["current_price"] for r in (rows.data or []) if r.get("current_price")}
-    except Exception as e:
-        logger.warning(f"매도 트리거 가격 조회 실패: {e}")
-        return
+    if price_map is None:
+        # 기본: DB에서 최신 추천가 조회
+        price_map = {}
+        try:
+            latest_res = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
+            if latest_res.data:
+                latest_date = latest_res.data[0]["date"]
+                rows = supabase.table("stock_recommendations").select("stock_code,current_price").eq("date", latest_date).execute()
+                price_map = {r["stock_code"]: r["current_price"] for r in (rows.data or []) if r.get("current_price")}
+        except Exception as e:
+            logger.warning(f"매도 트리거 가격 조회 실패: {e}")
+            return
 
     for account in accounts:
         try:
