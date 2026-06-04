@@ -507,6 +507,14 @@ export default function StockDetailPage({ params }: { params: { code: string } }
           >
             <Star className={`w-6 h-6 ${isFavorite(code) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
           </button>
+          <a
+            href={`https://finance.naver.com/item/main.naver?code=${code}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-2.5 py-1 text-xs font-semibold rounded border border-green-400 text-green-600 hover:bg-green-50 transition-colors"
+          >
+            네이버 증권 ↗
+          </a>
         </div>
       </div>
 

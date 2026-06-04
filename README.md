@@ -49,6 +49,7 @@ mpm/
 │       │   ├── portfolio.py        # AI 포트폴리오 분석 엔드포인트
 │       │   ├── analysis.py         # 퀀트·배당 전략 분석 엔드포인트
 │       │   └── virtual.py          # 가상 거래 계좌·포지션·체결내역 엔드포인트
+│       │   └── market.py           # 시장 현황 (트리맵·지수차트·수급·ADR·스파크라인)
 │       └── services/
 │           ├── kis_api.py          # KIS Open API 클라이언트 (토큰·가격·OHLCV·거래량)
 │           ├── gemini.py           # Gemini AI 포트폴리오 분석 서비스
@@ -63,6 +64,7 @@ mpm/
 │           ├── stock_master_sync.py  # KRX 전체 상장 종목 동기화
 │           ├── expected_return.py  # 기대수익률 계산
 │           ├── virtual_trading.py  # 가상 거래 트리거 (algo 매수·매도, 손절·익절)
+│           ├── sector_leader.py    # 섹터 주도주 스코어링 및 KIS 조회
 │           └── supabase_client.py  # Supabase Python 클라이언트 싱글턴
 ├── frontend/
 │   ├── next.config.js
@@ -78,12 +80,18 @@ mpm/
 │       │   ├── portfolio/page.tsx  # 프로필 관리 + 보유 종목 + AI 분석 + 매도 분석
 │       │   └── virtual/
 │       │       └── page.tsx        # 가상 거래 (계좌 관리 + 포지션 + 체결 내역)
+│       │   └── market/
+│       │       └── page.tsx        # 시장 현황 (지수 차트 + 트리맵 히트맵)
 │       ├── components/
 │       │   ├── charts/CandleChart.tsx       # 캔들스틱 차트
 │       │   └── stocks/
 │       │       ├── StockRow.tsx             # 종목 행
 │       │       ├── StockTable.tsx           # 종목 테이블
 │       │       └── FavoriteButton.tsx       # 즐겨찾기 버튼
+│   ├── market/
+│   │   ├── MarketDashboard.tsx     # 지수 차트 + MA + ADR + 수급 패널
+│   │   └── TreemapHeatmap.tsx      # Squarified 트리맵 히트맵
+│   └── LogoutButton.tsx            # 로그아웃 버튼 (네비게이션 바)
 │       ├── hooks/
 │       │   ├── useFavorites.ts     # 즐겨찾기 로컬스토리지 훅
 │       │   └── useProfile.ts       # 투자 프로필 상태 관리 훅
@@ -181,7 +189,8 @@ cp backend/.env.example backend/.env
 | `DATABASE_URL` | PostgreSQL 직접 연결 URL (참고용, 마이그레이션은 Dashboard에서 수동 실행) | Supabase > Project Settings > Database > Connection string |
 | `ALLOWED_ORIGINS` | CORS 허용 출처 (쉼표 구분) | 기본값: `http://localhost:3000` |
 | `ALLOWED_USER_EMAIL` | 허용할 사용자 이메일 (단일 사용자 화이트리스트) | 설정 시 해당 계정만 API 접근 허용 |
-| `ENABLE_SCHEDULER` | APScheduler 활성화 여부 | 배포 환경에서 `true` 설정 필요 (기본값: `false`) |
+| `ENABLE_SCHEDULER` | 일일 동기화 스케줄러 (Render 전용) | 기본값: `false` — Render에서 `true`, 로컬에서 `false` |
+| `ENABLE_INTRADAY` | 장중 10분 매매 트리거 활성화 (로컬 전용) | 기본값: `false`, 로컬에서 `true` 설정 |
 
 프론트엔드 환경 변수 (`frontend/.env.local`):
 
@@ -247,6 +256,16 @@ cp backend/.env.example backend/.env
 | `GET` | `/api/v1/virtual/accounts/{account_id}/trades` | 체결 내역 조회 |
 | `GET` | `/api/v1/virtual/accounts/{account_id}/performance` | 계좌 성과 요약 |
 | `POST` | `/api/v1/virtual/accounts/{account_id}/trades` | 수동 매매 체결 |
+
+### 시장 현황 (Market)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/market/treemap` | 트리맵 히트맵 데이터 (3분 캐시, `sort` 파라미터) |
+| `GET` | `/api/v1/market/index-chart` | KOSPI/KOSDAQ 지수 차트 (`market`, `period` 파라미터) |
+| `GET` | `/api/v1/market/investor-trend` | 기관·외국인·개인 수급 집계 |
+| `GET` | `/api/v1/market/adr` | 등락비율(ADR) 시계열 (`days` 파라미터) |
+| `GET` | `/api/v1/market/sparkline/{code}` | 종목 스파크라인 (최근 N일 종가) |
 
 전체 API 상세 스펙은 [backend/API.md](backend/API.md) 또는 http://localhost:8000/docs (Swagger UI) 참조.
 

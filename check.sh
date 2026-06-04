@@ -195,6 +195,11 @@ if [ "$CHECK_BE" = true ]; then
     # 가상 거래
     check_route "GET  /api/v1/virtual/accounts"         GET    "$BE_URL/api/v1/virtual/accounts"
     check_route "POST /api/v1/virtual/accounts"         POST   "$BE_URL/api/v1/virtual/accounts"
+    check_route "PATCH /api/v1/virtual/accounts/1"                PATCH  "$BE_URL/api/v1/virtual/accounts/1"
+    check_route "GET  /api/v1/virtual/accounts/1/positions"       GET    "$BE_URL/api/v1/virtual/accounts/1/positions"
+    check_route "GET  /api/v1/virtual/accounts/1/trades"          GET    "$BE_URL/api/v1/virtual/accounts/1/trades"
+    check_route "GET  /api/v1/virtual/accounts/1/performance"     GET    "$BE_URL/api/v1/virtual/accounts/1/performance"
+    check_route "POST /api/v1/virtual/accounts/1/trades"          POST   "$BE_URL/api/v1/virtual/accounts/1/trades"
 
     # 시장 현황
     check_route "GET  /api/v1/market/treemap"           GET    "$BE_URL/api/v1/market/treemap?sort=change_rate"
