@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { StockSummary, StockMaster, SectorLeaderStock } from "@/lib/types";
 import { useFavorites } from "@/hooks/useFavorites";
-import { RefreshCw, Search, Star, X, TrendingUp } from "lucide-react";
+import { RefreshCw, Search, Star, X, TrendingUp, ExternalLink } from "lucide-react";
 
 function ScoreBadge({ score }: { score?: number }) {
   if (score == null) return null;
@@ -317,6 +317,16 @@ export default function StocksPage() {
                         {s.market}
                       </span>
                     )}
+                    <a
+                      href={`https://finance.naver.com/item/main.naver?code=${s.stock_code}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="inline-flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-50 hover:bg-green-100 px-1.5 py-0.5 rounded transition-colors"
+                      title="네이버 증권"
+                    >
+                      N <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
                   </div>
                   <SourceBadges sources={s.source_conditions} />
                 </td>
@@ -414,6 +424,16 @@ export default function StocksPage() {
                     {(s.tags ?? []).filter((t) => t !== "정배열").map((tag) => (
                       <span key={tag} className="bg-blue-50 text-blue-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{tag}</span>
                     ))}
+                    <a
+                      href={`https://finance.naver.com/item/main.naver?code=${s.stock_code}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="inline-flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-50 hover:bg-green-100 px-1.5 py-0.5 rounded transition-colors"
+                      title="네이버 증권"
+                    >
+                      N <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right font-mono">{s.current_price > 0 ? s.current_price.toLocaleString() : "-"}</td>

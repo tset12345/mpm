@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Holding, HoldingSummary, SellAnalysis, PortfolioAnalysis } from "@/lib/types";
 import { useProfile } from "@/hooks/useProfile";
 import Link from "next/link";
-import { Pencil, Trash2, Plus, Check, X, TrendingDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Pencil, Trash2, Plus, Check, X, TrendingDown, ChevronUp, ChevronDown, ExternalLink } from "lucide-react";
 
 const PIE_COLORS = [
   "#3B82F6","#EF4444","#10B981","#F59E0B","#8B5CF6",
@@ -983,6 +983,15 @@ export default function PortfolioPage() {
                       </div>
                     </Link>
                     <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                      <a
+                        href={`https://finance.naver.com/item/main.naver?code=${h.stock_code}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-50 hover:bg-green-100 px-1.5 py-0.5 rounded transition-colors"
+                        title="네이버 증권"
+                      >
+                        N <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
                       {h.stock_type && (
                         <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                           h.stock_type === "ETF"  ? "bg-purple-50 text-purple-700" :
