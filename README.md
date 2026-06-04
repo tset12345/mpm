@@ -47,7 +47,8 @@ mpm/
 │       │   ├── holdings.py         # 보유 종목 CRUD + 매도 분석 엔드포인트
 │       │   ├── profiles.py         # 투자 프로필 CRUD 엔드포인트
 │       │   ├── portfolio.py        # AI 포트폴리오 분석 엔드포인트
-│       │   └── analysis.py         # 퀀트·배당 전략 분석 엔드포인트
+│       │   ├── analysis.py         # 퀀트·배당 전략 분석 엔드포인트
+│       │   └── virtual.py          # 가상 거래 계좌·포지션·체결내역 엔드포인트
 │       └── services/
 │           ├── kis_api.py          # KIS Open API 클라이언트 (토큰·가격·OHLCV·거래량)
 │           ├── gemini.py           # Gemini AI 포트폴리오 분석 서비스
@@ -56,11 +57,12 @@ mpm/
 │           ├── recommendations.py  # OHLCV 기술 분석 기반 추천 종목 생성
 │           ├── ohlcv_sync.py       # KIS → stock_ohlcv 테이블 동기화
 │           ├── history.py          # 추천 히스토리 스냅샷 저장
-│           ├── scheduler.py        # APScheduler 평일 자동 실행 (08:50/16:10 KST)
+│           ├── scheduler.py        # APScheduler 평일 자동 실행 (08:50/11:00/14:00/16:10 KST)
 │           ├── portfolio_analysis.py # Gemini AI 포트폴리오 분석 서비스
 │           ├── sell_signal.py      # 매도 신호 분석 (기술적·기본적·자산관리)
 │           ├── stock_master_sync.py  # KRX 전체 상장 종목 동기화
 │           ├── expected_return.py  # 기대수익률 계산
+│           ├── virtual_trading.py  # 가상 거래 트리거 (algo 매수·매도, 손절·익절)
 │           └── supabase_client.py  # Supabase Python 클라이언트 싱글턴
 ├── frontend/
 │   ├── next.config.js
@@ -73,7 +75,9 @@ mpm/
 │       │   │   ├── page.tsx        # 추천 종목 목록 + 즐겨찾기 탭 + 종목명 검색
 │       │   │   ├── history/page.tsx # 추천 히스토리 (일/주/월별)
 │       │   │   └── [code]/page.tsx  # 종목 상세 (PER/PBR/차트/즐겨찾기)
-│       │   └── portfolio/page.tsx  # 프로필 관리 + 보유 종목 + AI 분석 + 매도 분석
+│       │   ├── portfolio/page.tsx  # 프로필 관리 + 보유 종목 + AI 분석 + 매도 분석
+│       │   └── virtual/
+│       │       └── page.tsx        # 가상 거래 (계좌 관리 + 포지션 + 체결 내역)
 │       ├── components/
 │       │   ├── charts/CandleChart.tsx       # 캔들스틱 차트
 │       │   └── stocks/
@@ -98,7 +102,16 @@ mpm/
         ├── 008_profiles.sql                # profiles 테이블
         ├── 009_portfolio_analysis.sql      # portfolio_analyses 테이블
         ├── 010_profile_analysis_type.sql   # analysis_type 컬럼 추가
-        └── 011_stock_master.sql            # stock_master 테이블 (KRX 전체 종목)
+        ├── 011_stock_master.sql            # stock_master 테이블 (KRX 전체 종목)
+        ├── 012_reports_source_url.sql
+        ├── 013_reports_related_stocks.sql
+        ├── 014_recommendations_fund_score.sql
+        ├── 015_recommendations_entry_price.sql
+        ├── 016_recommendations_source_conditions.sql
+        ├── 017_sector_leaders.sql          # sector_leaders 테이블
+        ├── 018_favorites.sql               # favorites 테이블
+        ├── 019_virtual_trading.sql         # virtual_accounts, virtual_positions, virtual_trades
+        └── 020_enable_rls.sql              # 전체 테이블 RLS 활성화
 ```
 
 ---
@@ -167,6 +180,7 @@ cp backend/.env.example backend/.env
 | `SUPABASE_SERVICE_KEY` | Supabase service_role 키 (비공개 유지) | 동일 > service_role |
 | `DATABASE_URL` | PostgreSQL 직접 연결 URL (참고용, 마이그레이션은 Dashboard에서 수동 실행) | Supabase > Project Settings > Database > Connection string |
 | `ALLOWED_ORIGINS` | CORS 허용 출처 (쉼표 구분) | 기본값: `http://localhost:3000` |
+| `ALLOWED_USER_EMAIL` | 허용할 사용자 이메일 (단일 사용자 화이트리스트) | 설정 시 해당 계정만 API 접근 허용 |
 | `ENABLE_SCHEDULER` | APScheduler 활성화 여부 | 배포 환경에서 `true` 설정 필요 (기본값: `false`) |
 
 프론트엔드 환경 변수 (`frontend/.env.local`):
@@ -220,6 +234,19 @@ cp backend/.env.example backend/.env
 |--------|------|------|
 | `GET` | `/api/v1/portfolio/analysis` | AI 포트폴리오 분석 결과 조회 (holdings_hash 기반 캐시) |
 | `POST` | `/api/v1/portfolio/analysis` | AI 포트폴리오 분석 실행 (Gemini 2.5 Flash Lite, 프로필 유형별 프롬프트 분기) |
+
+### 가상 거래 (Virtual)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/virtual/accounts` | 가상 계좌 목록 조회 (profile_id 필터 가능) |
+| `POST` | `/api/v1/virtual/accounts` | 가상 계좌 생성 |
+| `PATCH` | `/api/v1/virtual/accounts/{account_id}` | 가상 계좌 설정 수정 |
+| `DELETE` | `/api/v1/virtual/accounts/{account_id}` | 가상 계좌 삭제 |
+| `GET` | `/api/v1/virtual/accounts/{account_id}/positions` | 보유 포지션 목록 |
+| `GET` | `/api/v1/virtual/accounts/{account_id}/trades` | 체결 내역 조회 |
+| `GET` | `/api/v1/virtual/accounts/{account_id}/performance` | 계좌 성과 요약 |
+| `POST` | `/api/v1/virtual/accounts/{account_id}/trades` | 수동 매매 체결 |
 
 전체 API 상세 스펙은 [backend/API.md](backend/API.md) 또는 http://localhost:8000/docs (Swagger UI) 참조.
 
@@ -349,6 +376,60 @@ KOSPI 838건 + KOSDAQ 1,819건 = 약 2,657건 보관.
 | `stock_name` | TEXT | 종목명 |
 | `created_at` | TIMESTAMPTZ | 등록 시각 |
 
+### virtual_accounts — 가상 거래 계좌
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | SERIAL PK | — |
+| `profile_id` | INTEGER FK | 연결된 투자 프로필 (ON DELETE CASCADE) |
+| `name` | TEXT | 계좌명 |
+| `initial_cash` | INTEGER | 초기 자금 (원, 기본 1,000만) |
+| `current_cash` | INTEGER | 현재 잔고 |
+| `strategy` | TEXT | 전략 (`engine_a` / `engine_b` / `both`) |
+| `min_score` | INTEGER | 매수 최소 기술 점수 (기본 50) |
+| `max_positions` | INTEGER | 최대 보유 종목 수 (기본 5) |
+| `position_size` | INTEGER | 종목당 투자 비율 % (기본 20) |
+| `stop_loss_pct` | INTEGER | 손절 기준 % (기본 10) |
+| `take_profit_pct` | INTEGER | 익절 기준 % (기본 20) |
+| `is_active` | BOOLEAN | 활성 여부 |
+| `created_at` | TIMESTAMPTZ | 생성 시각 |
+
+### virtual_positions — 가상 보유 포지션
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | SERIAL PK | — |
+| `account_id` | INTEGER FK | 연결된 가상 계좌 |
+| `stock_code` | TEXT | 종목 코드 |
+| `stock_name` | TEXT | 종목명 |
+| `quantity` | INTEGER | 보유 수량 |
+| `avg_price` | INTEGER | 평균 매입가 |
+| `entry_date` | DATE | 매수일 |
+| `entry_score` | INTEGER | 매수 시점 기술 점수 |
+| `engine` | TEXT | 매수 엔진 (`A` / `B`) |
+
+UNIQUE 제약: `(account_id, stock_code)`.
+
+### virtual_trades — 가상 체결 내역
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | SERIAL PK | — |
+| `account_id` | INTEGER FK | 연결된 가상 계좌 |
+| `stock_code` | TEXT | 종목 코드 |
+| `stock_name` | TEXT | 종목명 |
+| `side` | TEXT | `buy` / `sell` |
+| `quantity` | INTEGER | 체결 수량 |
+| `price` | INTEGER | 체결가 |
+| `amount` | INTEGER | 체결금액 (price × quantity) |
+| `trigger_type` | TEXT | `algo_buy` / `stop_loss` / `take_profit` / `sell_signal` / `manual` |
+| `engine` | TEXT | 엔진 (`A` / `B`) |
+| `tech_score` | INTEGER | 체결 시 기술 점수 |
+| `sell_score` | INTEGER | 매도 신호 점수 (매도 시) |
+| `pnl` | INTEGER | 실현손익 (매도 시, 매수 시 NULL) |
+| `pnl_rate` | NUMERIC(7,2) | 수익률 (%) |
+| `traded_at` | DATE | 체결일 |
+
 ---
 
 ## 데이터베이스 마이그레이션
@@ -371,26 +452,33 @@ KOSPI 838건 + KOSDAQ 1,819건 = 약 2,657건 보관.
 009_portfolio_analysis.sql      → portfolio_analyses
 010_profile_analysis_type.sql   → analysis_type 컬럼
 011_stock_master.sql            → stock_master
+012_reports_source_url.sql
+013_reports_related_stocks.sql
+014_recommendations_fund_score.sql
+015_recommendations_entry_price.sql
+016_recommendations_source_conditions.sql
+017_sector_leaders.sql          → sector_leaders
 018_favorites.sql               → favorites
+019_virtual_trading.sql         → virtual_accounts, virtual_positions, virtual_trades
+020_enable_rls.sql              → 전체 테이블 RLS 활성화
 ```
 
-### RLS(Row Level Security) 비활성화
+### RLS(Row Level Security)
 
-```sql
--- service_role 키 사용 환경에서 모든 테이블의 RLS 비활성화
-ALTER TABLE stock_recommendations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE stock_ohlcv DISABLE ROW LEVEL SECURITY;
-ALTER TABLE reports DISABLE ROW LEVEL SECURITY;
-ALTER TABLE keyword_subscriptions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE recommendation_history DISABLE ROW LEVEL SECURITY;
-ALTER TABLE holdings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE portfolio_analyses DISABLE ROW LEVEL SECURITY;
-ALTER TABLE stock_master DISABLE ROW LEVEL SECURITY;
-ALTER TABLE favorites DISABLE ROW LEVEL SECURITY;
-```
+모든 테이블에 RLS가 활성화되어 있습니다(`020_enable_rls.sql`).
 
-> RLS를 비활성화하지 않으면 `service_role` 키를 사용하더라도 백엔드에서 테이블 읽기/쓰기가 차단될 수 있습니다.
+- **백엔드(service_role 키)**: RLS를 자동으로 우회 — 별도 정책 불필요
+- **Supabase anon 키(프론트엔드)**: 정책 없음 = 기본 거부(default-deny) — PostgREST 직접 접근 차단
+- **보안 효과**: 공개 anon 키(`NEXT_PUBLIC_SUPABASE_ANON_KEY`)로 DB에 직접 읽기·쓰기 불가
+
+추가 보안 계층:
+
+| 계층 | 조치 |
+|------|------|
+| API 인증 | Supabase JWT(Bearer) 검증 (`app/core/auth.py`) |
+| 사용자 화이트리스트 | `ALLOWED_USER_EMAIL` 설정 시 해당 계정만 허용 |
+| CORS | `ALLOWED_ORIGINS` 설정 도메인만 허용 |
+| JWKS TTL | 1시간마다 공개키 재조회 (키 로테이션 대응) |
 
 ---
 
@@ -404,9 +492,12 @@ ALTER TABLE favorites DISABLE ROW LEVEL SECURITY;
   시작 체크: 오늘 추천 데이터 없으면 즉시 동기화 (서버 재시작 시 1회)
   08:50 KST: 장 전 추천 종목 갱신 (전일 종가 기준)
   09:05 KST: 섹터 주도주 전체 20개 갱신
-  11:00 KST: 오전 장중 추천 종목 갱신
-  14:00 KST: 오후 장중 추천 종목 갱신
-  16:10 KST: 장 후 추천 종목 갱신 + OHLCV 동기화 + 히스토리 스냅샷
+  11:00 KST: 오전 장중 추천 종목 갱신 + 가상 거래 트리거
+  14:00 KST: 오후 장중 추천 종목 갱신 + 가상 거래 트리거
+  16:10 KST: 장 후 추천 종목 갱신 + OHLCV 동기화 + 히스토리 스냅샷 + 가상 거래 트리거
+
+  가상 거래 트리거 순서: virtual_sell_trigger() → virtual_buy_trigger()
+  (손절·익절·매도신호 먼저 처리 후 신규 매수)
 
 [16:10 KST 장 후 동기화 상세]
         │
@@ -507,19 +598,8 @@ Supabase PostgREST에서 `ilike` 연산자를 사용하면 특정 버전에서 �
 현재 `GET /api/v1/reports/summary`의 키워드 필터링은 DB 레벨 `ilike` 대신 Python 서버사이드에서 처리합니다.  
 날짜 범위 필터(`gte`, `lte`)는 정상적으로 DB 레벨에서 처리합니다.
 
-### RLS(Row Level Security) 비활성화
+### RLS(Row Level Security)
 
-Supabase의 RLS가 활성화된 상태에서 `service_role` 키를 사용하더라도 Python 클라이언트(`supabase-py`)에서 정책이 적용되어 읽기/쓰기가 차단될 수 있습니다.  
-아래 SQL을 실행해 관련 테이블의 RLS를 비활성화하세요:
+모든 테이블에 RLS가 활성화되어 있습니다(`020_enable_rls.sql`). `service_role` 키는 RLS를 자동으로 우회하므로 백엔드 동작에 영향 없습니다.
 
-```sql
-ALTER TABLE stock_recommendations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE stock_ohlcv DISABLE ROW LEVEL SECURITY;
-ALTER TABLE reports DISABLE ROW LEVEL SECURITY;
-ALTER TABLE keyword_subscriptions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE recommendation_history DISABLE ROW LEVEL SECURITY;
-ALTER TABLE holdings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE portfolio_analyses DISABLE ROW LEVEL SECURITY;
-ALTER TABLE stock_master DISABLE ROW LEVEL SECURITY;
-```
+별도 정책을 추가하지 않으면 anon 키로는 모든 테이블이 기본 거부(default-deny)되어 PostgREST 직접 접근이 차단됩니다. 이는 의도된 보안 설정입니다.

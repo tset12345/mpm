@@ -7,7 +7,7 @@ from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
-from app.routers import stocks, holdings, profiles, portfolio, analysis, virtual
+from app.routers import stocks, holdings, profiles, portfolio, analysis, virtual, market
 from app.services.scheduler import start_scheduler, scheduler
 
 
@@ -45,6 +45,7 @@ app.include_router(profiles.router)
 app.include_router(portfolio.router)
 app.include_router(analysis.router)
 app.include_router(virtual.router)
+app.include_router(market.router)
 
 
 @app.api_route("/api/v1/health", methods=["GET", "HEAD"])

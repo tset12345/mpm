@@ -7,9 +7,31 @@
 | Base URL | `http://localhost:8000` |
 | API 버전 접두어 | `/api/v1` |
 | 응답 형식 | `application/json` |
-| 인증 | 없음 (내부망 전용) |
+| 인증 | Supabase JWT Bearer 토큰 필수 (`Authorization: Bearer <token>`) |
 | Swagger UI | http://localhost:8000/docs |
 | ReDoc | http://localhost:8000/redoc |
+
+## 인증 (Authentication)
+
+모든 엔드포인트는 Supabase JWT Bearer 토큰을 요구합니다 (`/api/v1/health` 제외).
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**토큰 검증 흐름** (`app/core/auth.py`):
+
+1. JWT 헤더의 `alg` 확인
+2. `ES256` 알고리즘: JWKS 엔드포인트에서 공개키 조회 후 검증 (1시간 캐시)
+3. `HS256` 알고리즘: `SUPABASE_JWT_SECRET`으로 검증
+4. `ALLOWED_USER_EMAIL` 설정 시 — payload의 `email`이 일치해야 접근 허용 (단일 사용자 화이트리스트)
+
+**오류 응답**
+
+| 상태코드 | 사유 |
+|----------|------|
+| 401 | 토큰 없음 / 만료 / 유효하지 않은 토큰 |
+| 403 | 이메일 화이트리스트 불일치 |
 
 ### 공통 응답 구조
 
@@ -1051,6 +1073,239 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 
 > **리포트 API** (`/api/v1/reports/*`)는 ARA 프로젝트(http://localhost:8001)로 분리되었습니다.
 
+---
+
+## 가상 거래 (Virtual)
+
+### GET /api/v1/virtual/accounts
+
+가상 거래 계좌 목록을 반환합니다.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|------|------|
+| `profile_id` | integer | 아니오 | 지정 시 해당 프로필의 계좌만 반환 |
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "profile_id": 1,
+      "name": "성장형 계좌",
+      "initial_cash": 10000000,
+      "current_cash": 8420000,
+      "strategy": "both",
+      "min_score": 50,
+      "max_positions": 5,
+      "position_size": 20,
+      "stop_loss_pct": 10,
+      "take_profit_pct": 20,
+      "is_active": true,
+      "created_at": "2026-05-20T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/v1/virtual/accounts
+
+가상 거래 계좌를 생성합니다.
+
+**Request Body** (application/json)
+
+```json
+{
+  "name": "성장형 계좌",
+  "profile_id": 1,
+  "initial_cash": 10000000,
+  "strategy": "both",
+  "min_score": 50,
+  "max_positions": 5,
+  "position_size": 20,
+  "stop_loss_pct": 10,
+  "take_profit_pct": 20
+}
+```
+
+| 필드 | 타입 | 필수 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `name` | string | 예 | — | 계좌명 |
+| `profile_id` | integer | 아니오 | — | 연결 프로필 |
+| `initial_cash` | integer | 아니오 | 10000000 | 초기 자금 (원) |
+| `strategy` | string | 아니오 | `"both"` | `engine_a` / `engine_b` / `both` |
+| `min_score` | integer | 아니오 | 50 | 매수 최소 기술 점수 |
+| `max_positions` | integer | 아니오 | 5 | 최대 보유 종목 수 |
+| `position_size` | integer | 아니오 | 20 | 종목당 투자 비율 (%) |
+| `stop_loss_pct` | integer | 아니오 | 10 | 손절 기준 (%) |
+| `take_profit_pct` | integer | 아니오 | 20 | 익절 기준 (%) |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 생성 |
+| 500 | DB 저장 실패 |
+
+---
+
+### PATCH /api/v1/virtual/accounts/{account_id}
+
+가상 계좌 설정을 수정합니다. 제공된 필드만 업데이트합니다.
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 수정 |
+| 404 | 계좌 없음 |
+| 500 | DB 실패 |
+
+---
+
+### DELETE /api/v1/virtual/accounts/{account_id}
+
+가상 계좌를 삭제합니다. 연결된 포지션·체결 내역도 CASCADE 삭제됩니다.
+
+---
+
+### GET /api/v1/virtual/accounts/{account_id}/positions
+
+계좌의 보유 포지션 목록을 반환합니다. KIS API에서 현재가를 조회하여 평가손익을 계산합니다.
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "stock_code": "005930",
+      "stock_name": "삼성전자",
+      "quantity": 30,
+      "avg_price": 68600,
+      "entry_date": "2026-05-20",
+      "entry_score": 82,
+      "engine": "A",
+      "current_price": 74200,
+      "profit_loss": 168000,
+      "profit_rate": 8.16
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/v1/virtual/accounts/{account_id}/trades
+
+계좌의 체결 내역을 반환합니다.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `limit` | integer | 아니오 | 100 | 최대 반환 건수 (max 500) |
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 5,
+      "stock_code": "005930",
+      "stock_name": "삼성전자",
+      "side": "sell",
+      "quantity": 30,
+      "price": 78000,
+      "amount": 2340000,
+      "trigger_type": "take_profit",
+      "engine": "A",
+      "tech_score": 82,
+      "sell_score": null,
+      "pnl": 282000,
+      "pnl_rate": 13.74,
+      "traded_at": "2026-05-28"
+    }
+  ]
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `trigger_type` | `algo_buy` / `stop_loss` / `take_profit` / `sell_signal` / `manual` |
+| `pnl` | 실현손익 (매도 시). 매수 시 `null` |
+| `pnl_rate` | 수익률 (%). 매도 시만 |
+
+---
+
+### GET /api/v1/virtual/accounts/{account_id}/performance
+
+계좌 성과 요약을 반환합니다.
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "initial_cash": 10000000,
+    "current_cash": 8420000,
+    "total_eval": 10200000,
+    "total_assets": 18620000,
+    "total_pnl": 8620000,
+    "total_return_pct": 86.2,
+    "realized_pnl": 450000,
+    "unrealized_pnl": 168000,
+    "win_rate": 66.7,
+    "total_trades": 6,
+    "position_count": 3
+  }
+}
+```
+
+---
+
+### POST /api/v1/virtual/accounts/{account_id}/trades
+
+수동 매매를 체결합니다.
+
+**Request Body** (application/json)
+
+```json
+{
+  "stock_code": "005930",
+  "stock_name": "삼성전자",
+  "side": "buy",
+  "quantity": 10,
+  "price": 74200,
+  "memo": "수동 매수"
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `stock_code` | string | 예 | 종목 코드 |
+| `stock_name` | string | 예 | 종목명 |
+| `side` | string | 예 | `"buy"` 또는 `"sell"` |
+| `quantity` | integer | 예 | 수량 |
+| `price` | integer | 예 | 체결가 |
+| `memo` | string | 아니오 | 메모 |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 체결 |
+| 400 | 잔고 부족 / 매도 수량 초과 |
+| 404 | 계좌 없음 |
+| 500 | DB 실패 |
+
+---
+
 ## 내부 서비스 구조 참고
 
 ### 기술적 분석 엔진 (`services/technical.py`)
@@ -1109,7 +1364,10 @@ FastAPI 시작 시 싱글턴 `kis_client` 인스턴스 생성. 첫 API 호출 �
 - 시작 체크: 서버 기동 시 당일 추천 종목 없으면 즉시 업데이트
 - 실행 일정 (평일):
   - **08:50 KST**: 전일 마감 데이터 기반 추천 종목 갱신
-  - **16:10 KST**: 당일 장마감 후 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장
+  - **09:05 KST**: 섹터 주도주 전체 20개 갱신
+  - **11:00 KST**: 오전 장중 추천 종목 갱신 + 가상 거래 트리거 (매도 → 매수)
+  - **14:00 KST**: 오후 장중 추천 종목 갱신 + 가상 거래 트리거 (매도 → 매수)
+  - **16:10 KST**: 당일 장마감 후 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장 + 가상 거래 트리거
 
 ---
 

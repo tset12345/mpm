@@ -175,4 +175,30 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  // 시장 현황
+  getMarketTreemap: (sort: "change_rate" | "frgn_net_buy" | "org_net_buy" = "change_rate") =>
+    fetchAPI<{ status: string; data: import("./types").MarketStock[] }>(
+      `/api/v1/market/treemap?sort=${sort}`
+    ),
+
+  getIndexChart: (market: "KOSPI" | "KOSDAQ" = "KOSPI", period: "D" | "W" | "M" = "D") =>
+    fetchAPI<{ status: string; market: string; period: string; data: import("./types").IndexCandle[] }>(
+      `/api/v1/market/index-chart?market=${market}&period=${period}`
+    ),
+
+  getInvestorTrend: () =>
+    fetchAPI<{ status: string; data: import("./types").InvestorTrend | null }>(
+      "/api/v1/market/investor-trend"
+    ),
+
+  getAdr: (days = 60) =>
+    fetchAPI<{ status: string; data: import("./types").AdrPoint[] }>(
+      `/api/v1/market/adr?days=${days}`
+    ),
+
+  getSparkline: (code: string, days = 5) =>
+    fetchAPI<{ status: string; data: import("./types").SparklinePoint[] }>(
+      `/api/v1/market/sparkline/${code}?days=${days}`
+    ),
 };

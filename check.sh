@@ -192,6 +192,17 @@ if [ "$CHECK_BE" = true ]; then
     check_route "DEL  /api/v1/stocks/favorites/000000"  DELETE "$BE_URL/api/v1/stocks/favorites/000000"
     check_route "GET  /api/v1/stocks/sector-leader/all" GET    "$BE_URL/api/v1/stocks/sector-leader/all"
 
+    # 가상 거래
+    check_route "GET  /api/v1/virtual/accounts"         GET    "$BE_URL/api/v1/virtual/accounts"
+    check_route "POST /api/v1/virtual/accounts"         POST   "$BE_URL/api/v1/virtual/accounts"
+
+    # 시장 현황
+    check_route "GET  /api/v1/market/treemap"           GET    "$BE_URL/api/v1/market/treemap?sort=change_rate"
+    check_route "GET  /api/v1/market/index-chart"       GET    "$BE_URL/api/v1/market/index-chart?market=KOSPI&period=D"
+    check_route "GET  /api/v1/market/investor-trend"    GET    "$BE_URL/api/v1/market/investor-trend"
+    check_route "GET  /api/v1/market/adr"               GET    "$BE_URL/api/v1/market/adr?days=60"
+    check_route "GET  /api/v1/market/sparkline/005930"  GET    "$BE_URL/api/v1/market/sparkline/005930?days=5"
+
     # entry_price / source_conditions 필드 검증
     echo ""
     info "추천 종목 상세 필드 확인:"
@@ -229,9 +240,11 @@ if [ "$CHECK_FE" = true ]; then
 
     check_port 3000 "Next.js"
 
-    check_api "GET / (홈)" "$FE_URL/" ""   # 307 리다이렉트도 정상
-    check_api "GET /stocks" "$FE_URL/stocks"
-    check_api "GET /portfolio" "$FE_URL/portfolio"
+    check_api "GET / (홈)"      "$FE_URL/"           ""   # 307 리다이렉트도 정상
+    check_api "GET /stocks"     "$FE_URL/stocks"
+    check_api "GET /portfolio"  "$FE_URL/portfolio"
+    check_api "GET /virtual"    "$FE_URL/virtual"
+    check_api "GET /market"     "$FE_URL/market"
 fi
 
 # ── 결과 요약 ─────────────────────────────────────────────────────────────────

@@ -347,3 +347,47 @@ export interface SectorLeaderStock {
   ma_aligned: boolean;
 }
 
+// ── Market types ──────────────────────────────────────────────────────────────
+
+export interface MarketStock {
+  stock_code: string;
+  stock_name: string;
+  sector: string;
+  current_price: number;
+  change_rate: number;
+  market_cap: number;
+  frgn_ntby_qty: number;
+  org_ntby_qty: number;
+  volume: number;
+  transaction_amount: number;
+}
+
+export interface IndexCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  frgn_ntby: number;
+}
+
+export interface AdrPoint {
+  date: string;
+  advancing: number;
+  declining: number;
+  adr: number;
+}
+
+export interface InvestorTrend {
+  foreign_net_buy: number;
+  institution_net_buy: number;
+  individual_net_buy: number;
+  stocks: { stock_code: string; stock_name: string; change_rate: number; frgn_ntby_qty: number; org_ntby_qty: number }[];
+}
+
+export interface SparklinePoint {
+  date: string;
+  close: number;
+}
+

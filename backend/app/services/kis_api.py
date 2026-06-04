@@ -97,6 +97,31 @@ class KISApiClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_index_chart(self, market_code: str, start_date: str, end_date: str, period: str = "D") -> dict:
+        """국내 지수 기간별 시세 (KOSPI: 0001, KOSDAQ: 1001), period: D/W/M"""
+        token = await self._get_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-index-daily-price",
+                params={
+                    "fid_cond_mrkt_div_code": "U",
+                    "fid_input_iscd": market_code,
+                    "fid_input_date_1": start_date,
+                    "fid_input_date_2": end_date,
+                    "fid_period_div_code": period,
+                },
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "appkey": settings.kis_app_key,
+                    "appsecret": settings.kis_app_secret,
+                    "tr_id": "FHKUP03500100",
+                    "custtype": "P",
+                },
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     _RANK_PARAMS = {
         "fid_cond_mrkt_div_code": "J",
         "fid_cond_scr_div_code": "20171",

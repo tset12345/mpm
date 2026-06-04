@@ -32,5 +32,14 @@ NNN_설명.sql
 | 009_portfolio_analysis.sql | portfolio_analyses 테이블 생성 (AI 분석 캐시) | - |
 | 010_profile_analysis_type.sql | profiles.analysis_type 컬럼 추가 ('quant' \| 'dividend') | - |
 | 011_stock_master.sql | stock_master 테이블 생성 (KOSPI·KOSDAQ 전체 종목 마스터) | - |
+| 012_reports_source_url.sql | reports.source_url 컬럼 추가 | - |
+| 013_reports_related_stocks.sql | reports.related_stocks 컬럼 추가 | - |
+| 014_recommendations_fund_score.sql | stock_recommendations.fund_score 컬럼 추가 | - |
+| 015_recommendations_entry_price.sql | stock_recommendations.entry_price 컬럼 추가 | - |
+| 016_recommendations_source_conditions.sql | stock_recommendations.source_conditions 컬럼 추가 | - |
+| 017_sector_leaders.sql | sector_leaders 테이블 생성 (섹터 주도주 캐시) | - |
+| 018_favorites.sql | favorites 테이블 생성 | - |
+| 019_virtual_trading.sql | virtual_accounts, virtual_positions, virtual_trades 테이블 생성 | 2026-06-04 |
+| 020_enable_rls.sql | 전체 14개 테이블 RLS 활성화 (anon 키 기본 거부) | 2026-06-04 |
 
 > **주의**: Supabase는 직접 DB 연결(psycopg2)이 차단되어 있어 코드에서 DDL 자동 실행 불가. 반드시 Dashboard에서 수동 실행.
