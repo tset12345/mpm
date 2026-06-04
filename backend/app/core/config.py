@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     supabase_service_key: str = ""
     database_url: str = ""
     allowed_origins: str = "http://localhost:3000,https://mpm-fe.vercel.app"
+    allowed_user_email: str = ""
     dart_api_key: str = ""
     supabase_jwt_secret: str = ""
     enable_scheduler: bool = False
