@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     allowed_user_email: str = ""
     dart_api_key: str = ""
     supabase_jwt_secret: str = ""
-    enable_scheduler: bool = False
+    enable_scheduler: bool = False   # 일일 동기화 + 섹터주도주 (Render)
+    enable_intraday: bool = False    # 장중 10분 매매 트리거 (Local only)
 
     class Config:
         env_file = ".env"

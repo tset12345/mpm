@@ -2,6 +2,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
 
+from app.core.config import settings
 from app.core.timezone import today_kst
 
 logger = logging.getLogger(__name__)
@@ -126,41 +127,46 @@ async def startup_sync_if_needed():
 
 
 def start_scheduler():
-    # 서버 시작 시 오늘(KST) 데이터가 없으면 즉시 동기화 (1회성)
-    scheduler.add_job(
-        startup_sync_if_needed,
-        "date",
-        id="startup_check",
-        replace_existing=True,
-    )
-    _sync_jobs = [
-        ("pre_market_sync",    8, 50,  "장전"),
-        ("mid_morning_sync",  11,  0,  "오전 장중"),
-        ("mid_afternoon_sync",14,  0,  "오후 장중"),
-        ("post_market_sync",  16, 10,  "장후"),
-    ]
-    for job_id, hour, minute, label in _sync_jobs:
+    if settings.enable_scheduler:
+        # 서버 시작 시 오늘(KST) 데이터가 없으면 즉시 동기화 (1회성)
         scheduler.add_job(
-            run_daily_sync,
-            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri", timezone="Asia/Seoul"),
-            id=job_id,
+            startup_sync_if_needed,
+            "date",
+            id="startup_check",
+            replace_existing=True,
+        )
+        for job_id, hour, minute in [
+            ("pre_market_sync",    8, 50),
+            ("mid_morning_sync",  11,  0),
+            ("mid_afternoon_sync",14,  0),
+            ("post_market_sync",  16, 10),
+        ]:
+            scheduler.add_job(
+                run_daily_sync,
+                CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri", timezone="Asia/Seoul"),
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=3600,
+            )
+        scheduler.add_job(
+            run_sector_leader_refresh,
+            CronTrigger(hour=9, minute=5, day_of_week="mon-fri", timezone="Asia/Seoul"),
+            id="sector_leader_refresh",
             replace_existing=True,
             misfire_grace_time=3600,
         )
-    scheduler.add_job(
-        run_sector_leader_refresh,
-        CronTrigger(hour=9, minute=5, day_of_week="mon-fri", timezone="Asia/Seoul"),
-        id="sector_leader_refresh",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    # 장중 10분 단위 가상 매매 트리거 (09:00~15:50 등록, 내부에서 15:20 이후 스킵)
-    scheduler.add_job(
-        run_intraday_trading,
-        CronTrigger(minute="*/10", hour="9-15", day_of_week="mon-fri", timezone="Asia/Seoul"),
-        id="intraday_trading",
-        replace_existing=True,
-        misfire_grace_time=120,
-    )
+        logger.info("일일 동기화 잡 등록 — 08:50/11:00/14:00/16:10 전체동기화 | 09:05 섹터주도주 (ENABLE_SCHEDULER=true)")
+
+    if settings.enable_intraday:
+        # 장중 10분 단위 가상 매매 트리거 — 로컬 전용
+        scheduler.add_job(
+            run_intraday_trading,
+            CronTrigger(minute="*/10", hour="9-15", day_of_week="mon-fri", timezone="Asia/Seoul"),
+            id="intraday_trading",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("장중 10분 가상매매 트리거 등록 (ENABLE_INTRADAY=true)")
+
     scheduler.start()
-    logger.info("스케줄러 시작 — 08:50/11:00/14:00/16:10 전체동기화 | 09:05 섹터주도주 | 장중 10분 가상매매 (월~금 KST)")
+    logger.info("스케줄러 시작 완료")

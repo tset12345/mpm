@@ -13,10 +13,10 @@ from app.services.scheduler import start_scheduler, scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.enable_scheduler:
+    if settings.enable_scheduler or settings.enable_intraday:
         start_scheduler()
     yield
-    if settings.enable_scheduler:
+    if settings.enable_scheduler or settings.enable_intraday:
         scheduler.shutdown()
 
 
