@@ -1,5 +1,5 @@
 """
-시장 현황 API - 트리맵, 지수 차트, 수급, ADR, 스파크라인
+시장 현황 API - 트리맵, 지수 차트, 수급, ADR, 스파크라인, 주요 지표
 """
 import asyncio
 import logging
@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import verify_token
@@ -248,6 +249,78 @@ def get_adr(days: int = Query(60)):
     except Exception as e:
         logger.warning(f"[market/adr] 계산 실패: {e}")
         return {"status": "success", "data": []}
+
+
+# ── 주요 시장 지표 (KOSPI·KOSDAQ·NASDAQ·USD/KRW) ──────────────────────────────
+
+_INDICES_DATA: dict = {}
+_INDICES_AT: float = 0.0
+_INDICES_TTL = 60  # 1분 캐시
+
+
+@router.get("/indices")
+async def get_market_indices():
+    """KOSPI, KOSDAQ, NASDAQ, USD/KRW 현재 지표 (1분 캐시)"""
+    global _INDICES_DATA, _INDICES_AT
+
+    if time.time() - _INDICES_AT < _INDICES_TTL and _INDICES_DATA:
+        return {"status": "success", "data": _INDICES_DATA}
+
+    today_str = date.today().strftime("%Y%m%d")
+    week_ago = (date.today() - timedelta(days=7)).strftime("%Y%m%d")
+
+    async def _fetch_korean_index(market_code: str, label: str) -> dict:
+        try:
+            raw = await kis_client.get_index_chart(market_code, week_ago, today_str, "D")
+            out = raw.get("output1", {})
+            return {
+                "label": label,
+                "price": _sf(out.get("bstp_nmix_prpr")),
+                "change": _sf(out.get("bstp_nmix_prdy_vrss")),
+                "change_rate": _sf(out.get("bstp_nmix_prdy_ctrt")),
+                "sign": out.get("prdy_vrss_sign", "3"),
+            }
+        except Exception as e:
+            logger.warning(f"[market/indices] {label} 조회 실패: {e}")
+            return {"label": label, "price": None, "change": None, "change_rate": None, "sign": "3"}
+
+    async def _fetch_yahoo(symbol: str, label: str) -> dict:
+        try:
+            import urllib.parse
+            encoded = urllib.parse.quote(symbol)
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0 (compatible)"},
+                timeout=10.0,
+            ) as client:
+                resp = await client.get(
+                    f"https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d"
+                )
+                meta = resp.json()["chart"]["result"][0]["meta"]
+            price = float(meta.get("regularMarketPrice") or 0)
+            prev = float(meta.get("chartPreviousClose") or meta.get("previousClose") or 0)
+            change = round(price - prev, 2)
+            change_rate = round(change / prev * 100, 2) if prev else 0.0
+            return {
+                "label": label,
+                "price": round(price, 2),
+                "change": change,
+                "change_rate": change_rate,
+                "sign": "2" if change > 0 else "4" if change < 0 else "3",
+            }
+        except Exception as e:
+            logger.warning(f"[market/indices] {label}({symbol}) 조회 실패: {e}")
+            return {"label": label, "price": None, "change": None, "change_rate": None, "sign": "3"}
+
+    kospi, kosdaq, nasdaq, usd_krw = await asyncio.gather(
+        _fetch_korean_index("0001", "KOSPI"),
+        _fetch_korean_index("1001", "KOSDAQ"),
+        _fetch_yahoo("^IXIC", "NASDAQ"),
+        _fetch_yahoo("KRW=X", "USD/KRW"),
+    )
+
+    _INDICES_DATA = {"kospi": kospi, "kosdaq": kosdaq, "nasdaq": nasdaq, "usd_krw": usd_krw}
+    _INDICES_AT = time.time()
+    return {"status": "success", "data": _INDICES_DATA}
 
 
 # ── 스파크라인 ────────────────────────────────────────────────────────────────

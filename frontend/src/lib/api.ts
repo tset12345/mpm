@@ -201,4 +201,9 @@ export const api = {
     fetchAPI<{ status: string; data: import("./types").SparklinePoint[] }>(
       `/api/v1/market/sparkline/${code}?days=${days}`
     ),
+
+  getMarketIndices: () =>
+    fetchAPI<{ status: string; data: import("./types").MarketIndices }>(
+      "/api/v1/market/indices"
+    ),
 };

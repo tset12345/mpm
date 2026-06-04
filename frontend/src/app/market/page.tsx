@@ -8,7 +8,7 @@ const TreemapHeatmap = dynamic(() => import("@/components/market/TreemapHeatmap"
 type Tab = "dashboard" | "heatmap";
 
 export default function MarketPage() {
-  const [tab, setTab] = useState<Tab>("heatmap");
+  const [tab, setTab] = useState<Tab>("dashboard");
 
   return (
     <div className="space-y-4">
@@ -16,7 +16,6 @@ export default function MarketPage() {
         <h1 className="text-xl font-bold text-gray-900">시장 현황</h1>
       </div>
 
-      {/* Tab bar */}
       <div className="flex border-b">
         {([["dashboard", "시장 지표"], ["heatmap", "히트맵"]] as [Tab, string][]).map(([t, label]) => (
           <button

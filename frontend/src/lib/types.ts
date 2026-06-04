@@ -386,6 +386,21 @@ export interface InvestorTrend {
   stocks: { stock_code: string; stock_name: string; change_rate: number; frgn_ntby_qty: number; org_ntby_qty: number }[];
 }
 
+export interface MarketIndexItem {
+  label: string;
+  price: number | null;
+  change: number | null;
+  change_rate: number | null;
+  sign: string; // "1":상한 "2":상승 "3":보합 "4":하락 "5":하한
+}
+
+export interface MarketIndices {
+  kospi: MarketIndexItem;
+  kosdaq: MarketIndexItem;
+  nasdaq: MarketIndexItem;
+  usd_krw: MarketIndexItem;
+}
+
 export interface SparklinePoint {
   date: string;
   close: number;

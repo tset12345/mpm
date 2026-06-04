@@ -1,28 +1,8 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
-import { createChart, IChartApi, ISeriesApi, LineData } from "lightweight-charts";
+import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useSession } from "@/components/AuthProvider";
-import { IndexCandle, AdrPoint, InvestorTrend } from "@/lib/types";
-
-type Market = "KOSPI" | "KOSDAQ";
-type Period = "D" | "W" | "M";
-
-const CHART_OPTIONS = {
-  layout: { background: { color: "#ffffff" }, textColor: "#374151" },
-  grid: { vertLines: { color: "#f3f4f6" }, horzLines: { color: "#f3f4f6" } },
-  rightPriceScale: { borderColor: "#e5e7eb" },
-  timeScale: { borderColor: "#e5e7eb", timeVisible: false },
-} as const;
-
-function computeMA(candles: IndexCandle[], period: number): LineData[] {
-  const result: LineData[] = [];
-  for (let i = period - 1; i < candles.length; i++) {
-    const sum = candles.slice(i - period + 1, i + 1).reduce((s, d) => s + d.close, 0);
-    result.push({ time: candles[i].date as import("lightweight-charts").Time, value: sum / period });
-  }
-  return result;
-}
+import { MarketIndices, MarketIndexItem, InvestorTrend } from "@/lib/types";
 
 function fmtNum(n: number): string {
   const abs = Math.abs(n);
@@ -31,194 +11,130 @@ function fmtNum(n: number): string {
   return n.toLocaleString();
 }
 
+function signColor(sign: string, type: "text" | "bg" = "text"): string {
+  const up = sign === "1" || sign === "2";
+  const dn = sign === "4" || sign === "5";
+  if (type === "bg") return up ? "bg-red-50" : dn ? "bg-blue-50" : "bg-gray-50";
+  return up ? "text-red-600" : dn ? "text-blue-600" : "text-gray-500";
+}
+
+function IndexCard({ item, priceDecimals = 2 }: { item: MarketIndexItem; priceDecimals?: number }) {
+  const up = item.sign === "1" || item.sign === "2";
+  const dn = item.sign === "4" || item.sign === "5";
+  const arrow = up ? "▲" : dn ? "▼" : "─";
+  const color = signColor(item.sign);
+
+  return (
+    <div className={`rounded-xl border p-4 ${signColor(item.sign, "bg")}`}>
+      <div className="text-xs font-semibold text-gray-500 mb-2">{item.label}</div>
+      {item.price == null ? (
+        <div className="text-sm text-gray-400">조회 실패</div>
+      ) : (
+        <>
+          <div className="text-2xl font-bold tabular-nums text-gray-900">
+            {item.price.toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}
+          </div>
+          <div className={`mt-1 text-sm font-medium tabular-nums ${color}`}>
+            {arrow}{" "}
+            {item.change != null && Math.abs(item.change).toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}
+            {item.change_rate != null && (
+              <span className="ml-1.5 text-xs opacity-80">
+                ({item.change_rate > 0 ? "+" : ""}{item.change_rate.toFixed(2)}%)
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MarketDashboard() {
   const session = useSession();
-  const [market, setMarket] = useState<Market>("KOSPI");
-  const [period, setPeriod] = useState<Period>("D");
-  const [maOn, setMaOn] = useState({ ma20: true, ma60: true, ma120: false });
-  const [candles, setCandles] = useState<IndexCandle[]>([]);
-  const [adrData, setAdrData] = useState<AdrPoint[]>([]);
+  const [indices, setIndices] = useState<MarketIndices | null>(null);
   const [investor, setInvestor] = useState<InvestorTrend | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-
-  const mainRef = useRef<HTMLDivElement>(null);
-  const adrRef = useRef<HTMLDivElement>(null);
-  const mainChart = useRef<IChartApi | null>(null);
-  const adrChart = useRef<IChartApi | null>(null);
-  const syncing = useRef(false);
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!session) return;
     setLoading(true);
     setFetchError(null);
     try {
-      const [chartRes, adrRes, invRes] = await Promise.all([
-        api.getIndexChart(market, period),
-        api.getAdr(period === "D" ? 60 : period === "W" ? 52 : 36),
+      const [idxRes, invRes] = await Promise.all([
+        api.getMarketIndices(),
         api.getInvestorTrend(),
       ]);
-      setCandles(chartRes.data || []);
-      setAdrData(adrRes.data || []);
-      setInvestor(invRes.data);
+      setIndices(idxRes.data ?? null);
+      setInvestor(invRes.data ?? null);
+      setFetchedAt(new Date());
     } catch (err: unknown) {
       setFetchError(err instanceof Error ? err.message : "데이터 조회 실패");
     } finally {
       setLoading(false);
     }
-  }, [market, period, session]);
+  }, [session]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Build main chart
-  useEffect(() => {
-    if (!mainRef.current || candles.length === 0) return;
-    mainChart.current?.remove();
-
-    const chart = createChart(mainRef.current, { ...CHART_OPTIONS, height: 320 });
-    mainChart.current = chart;
-
-    const mainSeries = chart.addLineSeries({ color: "#2563eb", lineWidth: 2, priceFormat: { type: "price", minMove: 0.01 } });
-    mainSeries.setData(candles.map(c => ({ time: c.date as import("lightweight-charts").Time, value: c.close })));
-
-    const maColors = { ma20: "#f59e0b", ma60: "#10b981", ma120: "#8b5cf6" };
-    const maPeriods: [keyof typeof maOn, number][] = [["ma20", 20], ["ma60", 60], ["ma120", 120]];
-    for (const [key, p] of maPeriods) {
-      if (!maOn[key]) continue;
-      const data = computeMA(candles, p);
-      if (data.length === 0) continue;
-      const s = chart.addLineSeries({ color: maColors[key], lineWidth: 1, lineStyle: 2 });
-      s.setData(data);
-    }
-
-    chart.timeScale().fitContent();
-
-    // Sync ADR
-    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (syncing.current || !range || !adrChart.current) return;
-      syncing.current = true;
-      adrChart.current.timeScale().setVisibleRange(range);
-      syncing.current = false;
-    });
-
-    return () => { chart.remove(); mainChart.current = null; };
-  }, [candles, maOn]);
-
-  // Build ADR chart
-  useEffect(() => {
-    if (!adrRef.current || adrData.length === 0) return;
-    adrChart.current?.remove();
-
-    const chart = createChart(adrRef.current, { ...CHART_OPTIONS, height: 100 });
-    adrChart.current = chart;
-
-    const adrSeries = chart.addLineSeries({ color: "#10b981", lineWidth: 2, priceFormat: { type: "custom", minMove: 0.1, formatter: (v: number) => `${v}%` } });
-    adrSeries.setData(adrData.map(d => ({ time: d.date as import("lightweight-charts").Time, value: d.adr })));
-
-    // Reference line at 50%
-    adrSeries.createPriceLine({ price: 50, color: "#9ca3af", lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
-
-    chart.timeScale().fitContent();
-
-    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (syncing.current || !range || !mainChart.current) return;
-      syncing.current = true;
-      mainChart.current.timeScale().setVisibleRange(range);
-      syncing.current = false;
-    });
-
-    return () => { chart.remove(); adrChart.current = null; };
-  }, [adrData]);
-
-  const toggleMA = (key: keyof typeof maOn) => {
-    setMaOn(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const trendColor = (n: number) => n > 0 ? "text-red-600" : n < 0 ? "text-blue-600" : "text-gray-500";
-  const trendSign = (n: number) => n > 0 ? "+" : "";
-
   return (
-    <div className="space-y-4">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Market toggle */}
-        <div className="flex rounded-lg border overflow-hidden text-sm">
-          {(["KOSPI", "KOSDAQ"] as Market[]).map(m => (
-            <button key={m} onClick={() => setMarket(m)}
-              className={`px-3 py-1.5 ${market === m ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
-              {m}
-            </button>
-          ))}
+    <div className="space-y-5">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-gray-400">
+          {fetchedAt ? `기준: ${fetchedAt.toLocaleTimeString("ko-KR")}` : ""}
         </div>
-
-        {/* Period toggle */}
-        <div className="flex rounded-lg border overflow-hidden text-sm">
-          {([["D", "일봉"], ["W", "주봉"], ["M", "월봉"]] as [Period, string][]).map(([p, label]) => (
-            <button key={p} onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 ${period === p ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* MA toggles */}
-        <div className="flex items-center gap-2 text-xs">
-          {([["ma20", "MA20", "text-amber-500"], ["ma60", "MA60", "text-emerald-500"], ["ma120", "MA120", "text-violet-500"]] as [keyof typeof maOn, string, string][]).map(([key, label, color]) => (
-            <button key={key} onClick={() => toggleMA(key)}
-              className={`flex items-center gap-1 px-2 py-1 rounded border ${maOn[key] ? "border-current opacity-100" : "opacity-40"} ${color}`}>
-              <span className={`w-3 h-0.5 inline-block ${maOn[key] ? "bg-current" : "bg-gray-300"}`} />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {loading && <span className="text-xs text-gray-400 animate-pulse">로딩 중...</span>}
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="text-xs text-blue-500 hover:underline disabled:opacity-40"
+        >
+          {loading ? "조회 중..." : "새로고침"}
+        </button>
       </div>
 
-      {/* Investor trend panel */}
-      {investor && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: "외국인 순매수", value: investor.foreign_net_buy },
-            { label: "기관 순매수", value: investor.institution_net_buy },
-            { label: "개인 순매수", value: investor.individual_net_buy },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-gray-500 mb-1">{label}</div>
-              <div className={`text-base font-bold tabular-nums ${trendColor(value)}`}>
-                {trendSign(value)}{fmtNum(value)}주
-              </div>
-            </div>
-          ))}
-        </div>
+      {fetchError && (
+        <div className="text-sm text-red-500 bg-red-50 rounded-lg px-4 py-3">{fetchError}</div>
       )}
 
-      {/* Main chart */}
-      <div className="border rounded-lg overflow-hidden bg-white">
-        <div className="px-3 py-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
-          {market} 지수
+      {/* 주요 지표 4개 */}
+      {indices ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <IndexCard item={indices.kospi} priceDecimals={2} />
+          <IndexCard item={indices.kosdaq} priceDecimals={2} />
+          <IndexCard item={indices.nasdaq} priceDecimals={2} />
+          <IndexCard item={indices.usd_krw} priceDecimals={2} />
         </div>
-        {fetchError ? (
-          <div className="h-80 flex flex-col items-center justify-center gap-2">
-            <div className="text-red-500 text-sm">{fetchError}</div>
-            <button onClick={fetchData} className="text-xs text-blue-500 underline">재시도</button>
-          </div>
-        ) : candles.length === 0 && !loading ? (
-          <div className="h-80 flex items-center justify-center text-gray-400 text-sm">
-            데이터를 불러올 수 없습니다 (KIS 지수 API 응답 없음)
-          </div>
-        ) : (
-          <div ref={mainRef} />
-        )}
-      </div>
+      ) : loading ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-xl border bg-gray-50 p-4 h-24 animate-pulse" />
+          ))}
+        </div>
+      ) : null}
 
-      {/* ADR sub-chart */}
-      {adrData.length > 0 && (
-        <div className="border rounded-lg overflow-hidden bg-white">
-          <div className="px-3 py-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
-            ADR (등락비율) — stock_ohlcv 종목 기준
+      {/* 수급 현황 */}
+      {investor && (
+        <div>
+          <div className="text-sm font-semibold text-gray-700 mb-2">수급 현황 (상위 50종목)</div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "외국인 순매수", value: investor.foreign_net_buy },
+              { label: "기관 순매수", value: investor.institution_net_buy },
+              { label: "개인 순매수", value: investor.individual_net_buy },
+            ].map(({ label, value }) => {
+              const sign = value > 0 ? "2" : value < 0 ? "4" : "3";
+              return (
+                <div key={label} className={`rounded-xl border p-4 text-center ${signColor(sign, "bg")}`}>
+                  <div className="text-xs text-gray-500 mb-1">{label}</div>
+                  <div className={`text-base font-bold tabular-nums ${signColor(sign)}`}>
+                    {value > 0 ? "+" : ""}{fmtNum(value)}주
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div ref={adrRef} />
         </div>
       )}
     </div>
