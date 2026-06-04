@@ -206,4 +206,9 @@ export const api = {
     fetchAPI<{ status: string; data: import("./types").MarketIndices }>(
       "/api/v1/market/indices"
     ),
+
+  getMarketRankings: (limit = 5) =>
+    fetchAPI<{ status: string; data: import("./types").MarketRankings }>(
+      `/api/v1/market/rankings?limit=${limit}`
+    ),
 };

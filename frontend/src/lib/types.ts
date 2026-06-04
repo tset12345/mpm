@@ -398,11 +398,38 @@ export interface MarketIndices {
   kospi: MarketIndexItem;
   kosdaq: MarketIndexItem;
   nasdaq: MarketIndexItem;
+  dow: MarketIndexItem;
+  sp500: MarketIndexItem;
   usd_krw: MarketIndexItem;
+  crude_oil: MarketIndexItem;
+  us10y: MarketIndexItem;
 }
 
 export interface SparklinePoint {
   date: string;
   close: number;
+}
+
+export interface RankingStock {
+  stock_code: string;
+  stock_name: string;
+  current_price: number;
+  change_rate: number;
+  volume?: number;
+  amount?: number;
+  net_buy?: number;
+  high_52w?: number;
+  low_52w?: number;
+}
+
+export interface MarketRankings {
+  rise: RankingStock[];
+  fall: RankingStock[];
+  volume: RankingStock[];
+  amount: RankingStock[];
+  foreign_buy: RankingStock[];
+  institution_buy: RankingStock[];
+  high_52w: RankingStock[];
+  low_52w: RankingStock[];
 }
 

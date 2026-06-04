@@ -207,11 +207,19 @@ class KISApiClient:
 
     async def get_new_high_ranking(self) -> dict:
         """신/신고가 근접 상위 종목 조회 (FHPST01870000)"""
+        return await self._highlow_request("1")
+
+    async def get_52week_high_low(self, div_cls: str) -> dict:
+        """52주 신고가(div_cls='3') / 신저가(div_cls='4') 조회"""
+        return await self._highlow_request(div_cls)
+
+    async def _highlow_request(self, div_cls: str) -> dict:
         token = await self._get_token()
+        params = {**self._NEAR_HIGH_PARAMS, "fid_div_cls_code": div_cls}
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/uapi/domestic-stock/v1/ranking/near-new-highlow",
-                params=self._NEAR_HIGH_PARAMS,
+                params=params,
                 headers={
                     "authorization": f"Bearer {token}",
                     "appkey": settings.kis_app_key,

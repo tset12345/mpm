@@ -208,6 +208,7 @@ if [ "$CHECK_BE" = true ]; then
     check_route "GET  /api/v1/market/adr"               GET    "$BE_URL/api/v1/market/adr?days=60"
     check_route "GET  /api/v1/market/sparkline/005930"  GET    "$BE_URL/api/v1/market/sparkline/005930?days=5"
     check_route "GET  /api/v1/market/indices"            GET    "$BE_URL/api/v1/market/indices"
+    check_route "GET  /api/v1/market/rankings"           GET    "$BE_URL/api/v1/market/rankings"
 
     # entry_price / source_conditions 필드 검증
     echo ""

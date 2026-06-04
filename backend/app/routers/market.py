@@ -251,6 +251,99 @@ def get_adr(days: int = Query(60)):
         return {"status": "success", "data": []}
 
 
+# ── 시장 랭킹 ────────────────────────────────────────────────────────────────
+
+_RANKINGS_DATA: dict = {}
+_RANKINGS_AT: float = 0.0
+_RANKINGS_TTL = 120  # 2분 캐시
+
+
+def _parse_vol_item(r: dict) -> dict:
+    return {
+        "stock_code": r.get("mksc_shrn_iscd") or r.get("stck_shrn_iscd", ""),
+        "stock_name": r.get("hts_kor_isnm", ""),
+        "current_price": int(_sf(r.get("stck_prpr", 0))),
+        "change_rate": _sf(r.get("prdy_ctrt", 0)),
+        "volume": int(_sf(r.get("acml_vol", 0))),
+        "amount": int(_sf(r.get("acml_tr_pbmn", 0))),
+    }
+
+
+def _parse_net_item(r: dict, net_field: str) -> dict:
+    return {
+        "stock_code": r.get("mksc_shrn_iscd") or r.get("stck_shrn_iscd", ""),
+        "stock_name": r.get("hts_kor_isnm", ""),
+        "current_price": int(_sf(r.get("stck_prpr", 0))),
+        "change_rate": _sf(r.get("prdy_ctrt", 0)),
+        "net_buy": int(_sf(r.get(net_field, 0))),
+    }
+
+
+def _parse_highlow_item(r: dict) -> dict:
+    return {
+        "stock_code": r.get("stck_shrn_iscd") or r.get("mksc_shrn_iscd", ""),
+        "stock_name": r.get("hts_kor_isnm", ""),
+        "current_price": int(_sf(r.get("stck_prpr", 0))),
+        "change_rate": _sf(r.get("prdy_ctrt", 0)),
+        "high_52w": int(_sf(r.get("w52_hgpr", 0))),
+        "low_52w": int(_sf(r.get("w52_lwpr", 0))),
+    }
+
+
+@router.get("/rankings")
+async def get_market_rankings(limit: int = Query(5, le=20)):
+    """상승률/하락률/거래량/거래대금/외인/기관 순매수/52주신고가/신저가 상위 N (2분 캐시)"""
+    global _RANKINGS_DATA, _RANKINGS_AT
+
+    if time.time() - _RANKINGS_AT < _RANKINGS_TTL and _RANKINGS_DATA:
+        data = _RANKINGS_DATA
+        return {"status": "success", "data": {k: v[:limit] for k, v in data.items()}}
+
+    try:
+        vol_raw, amt_raw, net_raw, high52_raw, low52_raw = await asyncio.gather(
+            kis_client.get_volume_ranking(),
+            kis_client.get_trading_amount_ranking(),
+            kis_client.get_institution_foreign_net_buy_ranking(),
+            kis_client.get_52week_high_low("3"),
+            kis_client.get_52week_high_low("4"),
+            return_exceptions=True,
+        )
+
+        vol_items = [_parse_vol_item(r) for r in (vol_raw.get("output", []) if isinstance(vol_raw, dict) else [])]
+        amt_items = [_parse_vol_item(r) for r in (amt_raw.get("output", []) if isinstance(amt_raw, dict) else [])]
+        net_items = net_raw.get("output", []) if isinstance(net_raw, dict) else []
+        high52_items = [_parse_highlow_item(r) for r in (high52_raw.get("output", []) if isinstance(high52_raw, dict) else []) if r.get("stck_prpr")]
+        low52_items  = [_parse_highlow_item(r) for r in (low52_raw.get("output", [])  if isinstance(low52_raw,  dict) else []) if r.get("stck_prpr")]
+
+        frgn_sorted = sorted(
+            [_parse_net_item(r, "frgn_ntby_qty") for r in net_items],
+            key=lambda x: x["net_buy"], reverse=True,
+        )
+        inst_sorted = sorted(
+            [_parse_net_item(r, "orgn_ntby_qty") for r in net_items],
+            key=lambda x: x["net_buy"], reverse=True,
+        )
+
+        _RANKINGS_DATA = {
+            "rise":             sorted(vol_items, key=lambda x: x["change_rate"], reverse=True),
+            "fall":             sorted(vol_items, key=lambda x: x["change_rate"]),
+            "volume":           vol_items,
+            "amount":           sorted(amt_items, key=lambda x: x["amount"], reverse=True),
+            "foreign_buy":      frgn_sorted,
+            "institution_buy":  inst_sorted,
+            "high_52w":         high52_items,
+            "low_52w":          low52_items,
+        }
+        _RANKINGS_AT = time.time()
+    except Exception as e:
+        logger.warning(f"[market/rankings] 랭킹 조회 실패: {e}")
+        if not _RANKINGS_DATA:
+            return {"status": "error", "data": {}}
+
+    data = _RANKINGS_DATA
+    return {"status": "success", "data": {k: v[:limit] for k, v in data.items()}}
+
+
 # ── 주요 시장 지표 (KOSPI·KOSDAQ·NASDAQ·USD/KRW) ──────────────────────────────
 
 _INDICES_DATA: dict = {}
@@ -311,14 +404,22 @@ async def get_market_indices():
             logger.warning(f"[market/indices] {label}({symbol}) 조회 실패: {e}")
             return {"label": label, "price": None, "change": None, "change_rate": None, "sign": "3"}
 
-    kospi, kosdaq, nasdaq, usd_krw = await asyncio.gather(
+    kospi, kosdaq, nasdaq, dow, sp500, usd_krw, crude_oil, us10y = await asyncio.gather(
         _fetch_korean_index("0001", "KOSPI"),
         _fetch_korean_index("1001", "KOSDAQ"),
         _fetch_yahoo("^IXIC", "NASDAQ"),
+        _fetch_yahoo("^DJI", "다우존스"),
+        _fetch_yahoo("^GSPC", "S&P 500"),
         _fetch_yahoo("KRW=X", "USD/KRW"),
+        _fetch_yahoo("CL=F", "WTI 유가"),
+        _fetch_yahoo("^TNX", "미국 10년물"),
     )
 
-    _INDICES_DATA = {"kospi": kospi, "kosdaq": kosdaq, "nasdaq": nasdaq, "usd_krw": usd_krw}
+    _INDICES_DATA = {
+        "kospi": kospi, "kosdaq": kosdaq,
+        "nasdaq": nasdaq, "dow": dow, "sp500": sp500,
+        "usd_krw": usd_krw, "crude_oil": crude_oil, "us10y": us10y,
+    }
     _INDICES_AT = time.time()
     return {"status": "success", "data": _INDICES_DATA}
 

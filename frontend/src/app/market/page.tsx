@@ -3,9 +3,10 @@ import { useState } from "react";
 import dynamic from "next/dynamic";
 
 const MarketDashboard = dynamic(() => import("@/components/market/MarketDashboard"), { ssr: false });
+const MarketRankings = dynamic(() => import("@/components/market/MarketRankings"), { ssr: false });
 const TreemapHeatmap = dynamic(() => import("@/components/market/TreemapHeatmap"), { ssr: false });
 
-type Tab = "dashboard" | "heatmap";
+type Tab = "dashboard" | "rankings" | "heatmap";
 
 export default function MarketPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -17,7 +18,11 @@ export default function MarketPage() {
       </div>
 
       <div className="flex border-b">
-        {([["dashboard", "시장 지표"], ["heatmap", "히트맵"]] as [Tab, string][]).map(([t, label]) => (
+        {([
+          ["dashboard", "시장 지표"],
+          ["rankings", "주도주 랭킹"],
+          ["heatmap", "히트맵"],
+        ] as [Tab, string][]).map(([t, label]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -32,6 +37,7 @@ export default function MarketPage() {
       </div>
 
       {tab === "dashboard" && <MarketDashboard />}
+      {tab === "rankings" && <MarketRankings />}
       {tab === "heatmap" && <TreemapHeatmap />}
     </div>
   );
