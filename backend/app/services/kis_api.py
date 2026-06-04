@@ -252,12 +252,24 @@ class KISApiClient:
             return resp.json()
 
     async def get_institution_foreign_net_buy_ranking(self) -> dict:
-        """기관·외국인 순매수 상위 종목 조회 (frgn_ntby_qty + orgn_ntby_qty 기준)"""
+        """기관·외국인 합산 순매수 상위 종목 (investor-trend용)"""
+        return await self._net_buy_request("0")
+
+    async def get_foreign_net_buy_ranking(self) -> dict:
+        """외국인 순매수 상위 종목 (fid_etc_cls_code=1)"""
+        return await self._net_buy_request("1")
+
+    async def get_institution_net_buy_ranking(self) -> dict:
+        """기관 순매수 상위 종목 (fid_etc_cls_code=2)"""
+        return await self._net_buy_request("2")
+
+    async def _net_buy_request(self, etc_cls: str) -> dict:
         token = await self._get_token()
+        params = {**self._NET_BUY_PARAMS, "fid_etc_cls_code": etc_cls}
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/uapi/domestic-stock/v1/quotations/foreign-institution-total",
-                params=self._NET_BUY_PARAMS,
+                params=params,
                 headers={
                     "authorization": f"Bearer {token}",
                     "appkey": settings.kis_app_key,

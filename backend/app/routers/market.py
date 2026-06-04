@@ -300,37 +300,33 @@ async def get_market_rankings(limit: int = Query(5, le=20)):
         return {"status": "success", "data": {k: v[:limit] for k, v in data.items()}}
 
     try:
-        vol_raw, amt_raw, net_raw, high52_raw, low52_raw = await asyncio.gather(
+        vol_raw, amt_raw, frgn_raw, inst_raw, high52_raw, low52_raw = await asyncio.gather(
             kis_client.get_volume_ranking(),
             kis_client.get_trading_amount_ranking(),
-            kis_client.get_institution_foreign_net_buy_ranking(),
-            kis_client.get_52week_high_low("3"),
-            kis_client.get_52week_high_low("4"),
+            kis_client.get_foreign_net_buy_ranking(),       # fid_etc_cls_code=1
+            kis_client.get_institution_net_buy_ranking(),   # fid_etc_cls_code=2
+            kis_client.get_52week_high_low("1"),            # 신고가
+            kis_client.get_52week_high_low("2"),            # 신저가
             return_exceptions=True,
         )
 
-        vol_items = [_parse_vol_item(r) for r in (vol_raw.get("output", []) if isinstance(vol_raw, dict) else [])]
-        amt_items = [_parse_vol_item(r) for r in (amt_raw.get("output", []) if isinstance(amt_raw, dict) else [])]
-        net_items = net_raw.get("output", []) if isinstance(net_raw, dict) else []
-        high52_items = [_parse_highlow_item(r) for r in (high52_raw.get("output", []) if isinstance(high52_raw, dict) else []) if r.get("stck_prpr")]
-        low52_items  = [_parse_highlow_item(r) for r in (low52_raw.get("output", [])  if isinstance(low52_raw,  dict) else []) if r.get("stck_prpr")]
+        def _out(raw) -> list:
+            return raw.get("output", []) if isinstance(raw, dict) else []
 
-        frgn_sorted = sorted(
-            [_parse_net_item(r, "frgn_ntby_qty") for r in net_items],
-            key=lambda x: x["net_buy"], reverse=True,
-        )
-        inst_sorted = sorted(
-            [_parse_net_item(r, "orgn_ntby_qty") for r in net_items],
-            key=lambda x: x["net_buy"], reverse=True,
-        )
+        vol_items  = [_parse_vol_item(r)             for r in _out(vol_raw)]
+        amt_items  = [_parse_vol_item(r)             for r in _out(amt_raw)]
+        frgn_items = [_parse_net_item(r, "frgn_ntby_qty") for r in _out(frgn_raw)]
+        inst_items = [_parse_net_item(r, "orgn_ntby_qty") for r in _out(inst_raw)]
+        high52_items = [_parse_highlow_item(r) for r in _out(high52_raw) if r.get("stck_prpr")]
+        low52_items  = [_parse_highlow_item(r) for r in _out(low52_raw)  if r.get("stck_prpr")]
 
         _RANKINGS_DATA = {
             "rise":             sorted(vol_items, key=lambda x: x["change_rate"], reverse=True),
             "fall":             sorted(vol_items, key=lambda x: x["change_rate"]),
             "volume":           vol_items,
             "amount":           sorted(amt_items, key=lambda x: x["amount"], reverse=True),
-            "foreign_buy":      frgn_sorted,
-            "institution_buy":  inst_sorted,
+            "foreign_buy":      sorted(frgn_items, key=lambda x: x["net_buy"], reverse=True),
+            "institution_buy":  sorted(inst_items, key=lambda x: x["net_buy"], reverse=True),
             "high_52w":         high52_items,
             "low_52w":          low52_items,
         }
