@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useSession } from "@/components/AuthProvider";
-import { MarketRankings, RankingStock } from "@/lib/types";
+import type { MarketRankings, RankingStock } from "@/lib/types";
 
 function fmtAmt(n: number): string {
   if (Math.abs(n) >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "십억";

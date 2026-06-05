@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useSession } from "@/components/AuthProvider";
-import { MarketIndices, MarketIndexItem, InvestorTrend } from "@/lib/types";
+import type { MarketIndices, MarketIndexItem, InvestorTrend } from "@/lib/types";
 
 function fmtNum(n: number): string {
   const abs = Math.abs(n);
