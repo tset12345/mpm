@@ -10,12 +10,16 @@ Stage 2 — Dual Engine Scoring (each 0-100)
     골든크로스 (15) · ADX/DMI 상승추세 (15) · 일목 구름대 돌파 (15)
     볼린저 스퀴즈 상단돌파 (15) · 전고점 돌파+거래량 (15)
     OBV 선행 돌파 (15) · 거래량 급증 (10)
-    Soft veto: RSI ≥ 70 → -10
+    Hard Veto: RSI ≥ 80 → 0 (극과열, 진입 금지)
+    RSI 70 최초 돌파: +5 (모멘텀 가산)
+    Soft Veto: RSI ≥ 70 지속 → -10
+    BEAR 시장: 즉시 0 (가짜 돌파 위험)
 
   Engine B – Mean Reversion (max 100)
-    이격도 저점 (15) · 과매도 그룹 RSI/Stoch/CCI/MFI ≥2→25 (25)
-    서포트밴드 Bollinger/Envelope/Pivot/Fibonacci + 양봉 (35)
-    눌림목 반등 (25)
+    Pre-filter: 거래대금 50억 미만 → 0 (유동성 부족)
+    Pre-filter: MA60 우하향 중 → 0 (칼날 잡기 방지)
+    B1 (disparity < 99): 이격도(15) + 과매도그룹(25) + 수요밴드(35) / 75 * 100
+    B2 (disparity ≥ 99): 과매도그룹(25) + 수요밴드(35) + 눌림목(25) / 85 * 100
 
   Final score = max(engine_a_score, engine_b_score).
   Winning engine sets tags.
@@ -387,7 +391,13 @@ def _engine_a(
     closes: list[float], highs: list[float], lows: list[float], volumes: list[float],
     cur: float, ma5: float | None, ma20: float | None, ma60: float | None,
     rsi_val: float | None, vol_ma20: float, cloud_position: str,
+    market_regime: str = "BULL",
+    prev_rsi: float | None = None,
 ) -> tuple[int, list[str]]:
+    # 하락장에서 추세 돌파는 가짜 돌파 확률이 높으므로 즉시 0점
+    if market_regime == "BEAR":
+        return 0, []
+
     score = 0
     tags: list[str] = []
 
@@ -468,9 +478,14 @@ def _engine_a(
         elif vr >= 1.5:
             score += 3
 
-    # Soft veto: RSI ≥ 70 과열 감점
-    if rsi_val is not None and rsi_val >= 70:
-        score = max(0, score - 10)
+    # RSI 과열 처리 (3단계)
+    if rsi_val is not None:
+        if rsi_val >= 80:
+            return 0, []  # Hard Veto — 극과열 구간, 진입 금지
+        elif rsi_val >= 70 and prev_rsi is not None and prev_rsi < 70:
+            score += 5   # 최초 70 돌파 = 강한 모멘텀 가산
+        elif rsi_val >= 70:
+            score = max(0, score - 10)  # 고점 지속 = Soft Veto
 
     return min(100, score), tags
 
@@ -481,29 +496,26 @@ def _engine_b(
     closes: list[float], highs: list[float], lows: list[float], volumes: list[float],
     cur: float, ma5: float | None, ma20: float | None,
     rsi_val: float | None,
+    transaction_amount: float = 0,
+    ma60: float | None = None,
+    ma60_prev: float | None = None,
 ) -> tuple[int, list[str]]:
-    score = 0
+    # Pre-filter 1: 일 거래대금 50억 미만 — 유동성 부족 종목
+    if transaction_amount < 5_000_000_000:
+        return 0, []
+
+    # Pre-filter 2: MA60 우하향 중 — 칼날 잡기 방지
+    if ma60 is not None and ma60_prev is not None and ma60 < ma60_prev:
+        return 0, []
+
     tags: list[str] = []
     bullish = len(closes) >= 2 and closes[-1] > closes[-2]
+    disparity = cur / ma20 * 100 if (ma20 is not None and ma20 > 0) else 100.0
 
-    # 1. 이격도 저점 (max 15)
-    if ma20 is not None and ma20 > 0:
-        disparity = cur / ma20 * 100
-        if disparity < 93:
-            score += 15
-            tags.append("이격도 저점")
-        elif disparity < 95:
-            score += 12
-            tags.append("이격도 저점")
-        elif disparity < 97:
-            score += 8
-            tags.append("이격도 저점")
-        elif disparity < 99:
-            score += 3
+    # ── 공통 지표 (B1/B2 모두 사용) ──────────────────────────────────────────
 
-    # 2. 과매도 그룹: RSI / Stoch / CCI / MFI (max 25, grouped — ≥2 signals)
+    # 과매도 그룹: RSI / Stoch / CCI / MFI (max 25)
     oversold_signals: list[str] = []
-
     if rsi_val is not None and rsi_val < 35:
         oversold_signals.append("RSI")
     sk, _ = stochastic(highs, lows, closes, 14, 3)
@@ -518,65 +530,93 @@ def _engine_b(
 
     n_over = len(oversold_signals)
     if n_over >= 3:
-        score += 25
+        oversold_score = 25
         tags.append(f"과매도 집중({'+'.join(oversold_signals)})")
     elif n_over == 2:
-        score += 20
+        oversold_score = 20
         tags.append(f"과매도 집중({'+'.join(oversold_signals)})")
     elif n_over == 1:
-        score += 10
+        oversold_score = 10
         tags.append(f"{oversold_signals[0]} 과매도")
+    else:
+        oversold_score = 0
 
-    # 3. 서포트밴드 통합 (max 35): Bollinger / Envelope / Pivot S2 / Fibonacci + 양봉
+    # 수요밴드 통합: Bollinger / Envelope / Pivot S2 / Fibonacci (max 35)
     support_labels: list[str] = []
-
     bb = bollinger(closes, 20, 2.0)
     if bb is not None and cur <= bb[2] * 1.02:
         support_labels.append("볼린저하단")
-
     env = envelope(closes, 20, 0.05)
     if env is not None and cur <= env[2] * 1.01:
         support_labels.append("엔벨로프하단")
-
     if len(highs) >= 2:
         piv = pivot_point(highs[-2], lows[-2], closes[-2])
         if piv["s2"] * 0.99 <= cur <= piv["s2"] * 1.05:
             support_labels.append("피봇S2")
-
     fib = fibonacci_support(highs, lows, closes)
     if fib["near"]:
         support_labels.append(f"피보나치{round((fib['ratio'] or 0) * 100, 0):.0f}%")
 
     n_sup = len(support_labels)
     if n_sup >= 2:
-        score += 35 if bullish else 20
+        demand_band_score = 35 if bullish else 20
         tags.append(f"수요밴드({'+'.join(support_labels[:2])})")
     elif n_sup == 1:
-        score += 20 if bullish else 8
+        demand_band_score = 20 if bullish else 8
         tags.append(support_labels[0])
+    else:
+        demand_band_score = 0
 
-    # 4. 눌림목 반등 (max 25)
-    if (ma5 is not None and ma20 is not None and ma5 > ma20 and cur > ma20
-            and lows and any(abs(l - ma20) / ma20 < 0.02 for l in lows[-5:])):
-        if bullish:
-            score += 25
-            tags.append("눌림목 반등")
+    # ── B1 / B2 분기 처리 ────────────────────────────────────────────────────
+
+    if disparity < 99:
+        # B1: 낙폭과대 V자 반등형 (이격도 + 과매도 + 수요밴드, 만점 75)
+        if disparity < 93:
+            disp_score = 15
+            tags.append("이격도 저점")
+        elif disparity < 95:
+            disp_score = 12
+            tags.append("이격도 저점")
+        elif disparity < 97:
+            disp_score = 8
+            tags.append("이격도 저점")
         else:
-            score += 12
-            tags.append("눌림목 근접")
+            disp_score = 3
 
-    return min(100, score), tags
+        raw_score = disp_score + oversold_score + demand_band_score
+        final_score = int(raw_score / 75 * 100)
+    else:
+        # B2: 정배열 눌림목형 (과매도 + 수요밴드 + 눌림목, 만점 85)
+        nulim_score = 0
+        if (ma5 is not None and ma20 is not None and ma5 > ma20 and cur > ma20
+                and lows and any(abs(l - ma20) / ma20 < 0.02 for l in lows[-5:])):
+            if bullish:
+                nulim_score = 25
+                tags.append("눌림목 반등")
+            else:
+                nulim_score = 12
+                tags.append("눌림목 근접")
+
+        raw_score = oversold_score + demand_band_score + nulim_score
+        final_score = int(raw_score / 85 * 100)
+
+    return min(100, final_score), tags
 
 
 # ── Main scoring function ──────────────────────────────────────────────────────
 
-def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
+def analyze(
+    records: list[dict],
+    cloud_position: str = "unknown",
+    market_regime: str = "BULL",
+) -> dict:
     """
     Dual-engine technical analysis scoring.
 
     Args:
         records: OHLCV dicts sorted oldest-first (keys: stck_hgpr, stck_lwpr, stck_clpr, acml_vol).
         cloud_position: "above_cloud" | "in_cloud" | "below_cloud" | "unknown".
+        market_regime: "BULL" | "BEAR" — KOSPI MA20 기반 시장 국면, Engine A에 전달.
     """
     EMPTY: dict = {
         "score": 0, "tags": [], "signals": {},
@@ -615,14 +655,28 @@ def analyze(records: list[dict], cloud_position: str = "unknown") -> dict:
     rsi_val = rsi(closes, 14)
     atr_val = atr(highs, lows, closes, 14)
 
+    # Engine A: 직전 봉 RSI (최초 70 돌파 감지용)
+    prev_rsi = rsi(closes[:-1], 14) if len(closes) >= 16 else None
+
+    # Engine B: MA60 기울기 (5봉 전 대비 하향 여부 판단)
+    ma60_prev = sma(closes[:-5], 60) if len(closes) >= 65 else None
+
+    # Engine B: 당일 거래대금 추정 (종가 × 거래량)
+    transaction_amount = closes[-1] * volumes[-1]
+
     # ── Stage 2: Dual Engine ──────────────────────────────────────────────────
     score_a, tags_a = _engine_a(
         closes, highs, lows, volumes, cur,
         ma5, ma20, ma60, rsi_val, vol_ma20, cloud_position,
+        market_regime=market_regime,
+        prev_rsi=prev_rsi,
     )
     score_b, tags_b = _engine_b(
         closes, highs, lows, volumes, cur,
         ma5, ma20, rsi_val,
+        transaction_amount=transaction_amount,
+        ma60=ma60,
+        ma60_prev=ma60_prev,
     )
 
     if score_a >= score_b:

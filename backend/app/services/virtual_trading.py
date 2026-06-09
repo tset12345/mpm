@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone, timedelta
 from math import floor
 
 from app.services.supabase_client import supabase
+from app.services.technical import atr as calc_atr, sma, rsi
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,17 @@ def get_performance(account_id: int) -> dict:
 
 # ── 체결 ─────────────────────────────────────────────────────────────────────
 
+def _fetch_ohlcv_for_exit(code: str, limit: int = 70) -> list[dict]:
+    """매도 판단용 OHLCV 조회 (최신순 → 오름차순 반환)."""
+    res = (supabase.table("stock_ohlcv")
+           .select("close_price,high_price,low_price,volume,trade_date")
+           .eq("stock_code", code)
+           .order("trade_date", desc=True)
+           .limit(limit)
+           .execute())
+    return list(reversed(res.data or []))
+
+
 def _execute_buy(account: dict, stock_code: str, stock_name: str,
                  price: int, trigger_type: str, engine: str | None,
                  tech_score: int | None) -> dict | None:
@@ -209,6 +221,23 @@ def _execute_buy(account: dict, stock_code: str, stock_name: str,
     amount = quantity * price
     today_str = _today().isoformat()
 
+    # 매수 시점 ATR·저가 계산 (엔진별 청산 기준으로 저장)
+    entry_atr: int | None = None
+    entry_low: int | None = None
+    try:
+        records = _fetch_ohlcv_for_exit(stock_code, 70)
+        if len(records) >= 15:
+            closes  = [float(r["close_price"]) for r in records]
+            highs   = [float(r["high_price"])  for r in records]
+            lows    = [float(r["low_price"])   for r in records]
+            atr_val = calc_atr(highs, lows, closes, 14)
+            if atr_val is not None:
+                entry_atr = int(atr_val)
+            if records:
+                entry_low = int(records[-1]["low_price"])
+    except Exception as e:
+        logger.debug(f"{stock_code} 매수 ATR 계산 실패: {e}")
+
     supabase.table("virtual_trades").insert({
         "account_id":   account_id,
         "stock_code":   stock_code,
@@ -224,32 +253,42 @@ def _execute_buy(account: dict, stock_code: str, stock_name: str,
     }).execute()
 
     supabase.table("virtual_positions").upsert({
-        "account_id":  account_id,
-        "stock_code":  stock_code,
-        "stock_name":  stock_name,
-        "quantity":    quantity,
-        "avg_price":   price,
-        "entry_date":  today_str,
-        "entry_score": tech_score,
-        "engine":      engine,
+        "account_id":    account_id,
+        "stock_code":    stock_code,
+        "stock_name":    stock_name,
+        "quantity":      quantity,
+        "avg_price":     price,
+        "entry_date":    today_str,
+        "entry_score":   tech_score,
+        "engine":        engine,
+        "entry_atr":     entry_atr,
+        "highest_price": price,
+        "half_exited":   False,
+        "entry_low":     entry_low,
     }, on_conflict="account_id,stock_code").execute()
 
     supabase.table("virtual_accounts").update({"current_cash": current_cash - amount}).eq("id", account_id).execute()
 
-    logger.info(f"[{account_id}] {stock_code} 매수 체결 {quantity}주 @{price:,} ({trigger_type})")
+    logger.info(f"[{account_id}] {stock_code} 매수 체결 {quantity}주 @{price:,} ({trigger_type}) ATR={entry_atr}")
     return {"stock_code": stock_code, "quantity": quantity, "price": price, "amount": amount}
 
 
 def _execute_sell(account: dict, position: dict, price: int,
-                  trigger_type: str, sell_score: int | None) -> dict | None:
+                  trigger_type: str, sell_score: int | None,
+                  quantity: int | None = None) -> dict | None:
+    """전량 또는 지정 수량 매도. quantity 생략 시 보유 전량."""
     account_id   = account["id"]
     current_cash = account["current_cash"]
     stock_code   = position["stock_code"]
-    quantity     = position["quantity"]
+    pos_qty      = position["quantity"]
     avg_price    = position["avg_price"]
+    sell_qty     = quantity if quantity is not None else pos_qty
 
-    amount   = quantity * price
-    pnl      = (price - avg_price) * quantity
+    if sell_qty <= 0:
+        return None
+
+    amount   = sell_qty * price
+    pnl      = (price - avg_price) * sell_qty
     pnl_rate = round((price - avg_price) / avg_price * 100, 2)
     today_str = _today().isoformat()
 
@@ -258,7 +297,7 @@ def _execute_sell(account: dict, position: dict, price: int,
         "stock_code":   stock_code,
         "stock_name":   position["stock_name"],
         "side":         "sell",
-        "quantity":     quantity,
+        "quantity":     sell_qty,
         "price":        price,
         "amount":       amount,
         "trigger_type": trigger_type,
@@ -269,11 +308,20 @@ def _execute_sell(account: dict, position: dict, price: int,
         "traded_at":    today_str,
     }).execute()
 
-    supabase.table("virtual_positions").delete().eq("id", position["id"]).execute()
+    remaining = pos_qty - sell_qty
+    if remaining <= 0:
+        supabase.table("virtual_positions").delete().eq("id", position["id"]).execute()
+    else:
+        # 분할 매도: 수량 차감 + half_exited 플래그 설정
+        supabase.table("virtual_positions").update({
+            "quantity": remaining,
+            "half_exited": True,
+        }).eq("id", position["id"]).execute()
+
     supabase.table("virtual_accounts").update({"current_cash": current_cash + amount}).eq("id", account_id).execute()
 
-    logger.info(f"[{account_id}] {stock_code} 매도 체결 {quantity}주 @{price:,} 손익 {pnl:+,}원 ({trigger_type})")
-    return {"stock_code": stock_code, "quantity": quantity, "price": price, "pnl": pnl}
+    logger.info(f"[{account_id}] {stock_code} 매도 체결 {sell_qty}주 @{price:,} 손익 {pnl:+,}원 ({trigger_type})")
+    return {"stock_code": stock_code, "quantity": sell_qty, "price": price, "pnl": pnl}
 
 
 # ── 알고리즘 트리거 ───────────────────────────────────────────────────────────
@@ -383,11 +431,11 @@ def virtual_sell_trigger(price_map: dict[str, int] | None = None) -> None:
 
 
 def _process_sell_for_account(account: dict, price_map: dict[str, int]) -> None:
-    from app.services.sell_signal import analyze_sell
-
-    positions = get_positions(account["id"])
+    positions_res = supabase.table("virtual_positions").select("*").eq("account_id", account["id"]).execute()
+    positions = positions_res.data or []
     stop_loss_pct   = account["stop_loss_pct"]
     take_profit_pct = account["take_profit_pct"]
+    today = _today()
 
     for pos in positions:
         code      = pos["stock_code"]
@@ -397,41 +445,109 @@ def _process_sell_for_account(account: dict, price_map: dict[str, int]) -> None:
             continue
 
         change_rate = (price - avg_price) / avg_price * 100
+        engine      = pos.get("engine")
 
-        # 손절
+        # ── 공통: 고정 손절·익절 ────────────────────────────────────────────────
         if change_rate <= -stop_loss_pct:
             account = get_account(account["id"])
             _execute_sell(account, pos, price, "stop_loss", None)
             continue
 
-        # 익절
         if change_rate >= take_profit_pct:
             account = get_account(account["id"])
             _execute_sell(account, pos, price, "take_profit", None)
             continue
 
-        # 매도 신호 (OHLCV 없이 간이 분석)
+        # ── OHLCV 조회 ─────────────────────────────────────────────────────────
         try:
-            ohlcv_res = (supabase.table("stock_ohlcv")
-                         .select("close_price,high_price,low_price,volume,trade_date")
-                         .eq("stock_code", code)
-                         .order("trade_date", desc=True)
-                         .limit(60)
-                         .execute())
-            records = list(reversed(ohlcv_res.data or []))
-            if len(records) < 20:
+            records = _fetch_ohlcv_for_exit(code, 70)
+            if len(records) < 15:
                 continue
 
-            fmt = [{"stck_clpr": str(r["close_price"]), "stck_hgpr": str(r["high_price"]),
-                    "stck_lwpr": str(r["low_price"]), "acml_vol": str(r["volume"])} for r in records]
-            result = analyze_sell(records=fmt, avg_price=avg_price, current_price=price)
-            sell_score = result.get("sell_score", 0)
+            closes = [float(r["close_price"]) for r in records]
+            highs  = [float(r["high_price"])  for r in records]
+            lows   = [float(r["low_price"])   for r in records]
 
-            if sell_score > 65:
-                account = get_account(account["id"])
-                _execute_sell(account, pos, price, "sell_signal", sell_score)
+            atr_val = calc_atr(highs, lows, closes, 14)
+            ma20    = sma(closes, 20)
         except Exception as e:
-            logger.warning(f"[{account['id']}] {code} 매도 신호 분석 실패: {e}")
+            logger.warning(f"[{account['id']}] {code} OHLCV 조회 실패: {e}")
+            continue
+
+        # ── Engine A 청산 ───────────────────────────────────────────────────────
+        if engine == "A":
+            entry_atr     = pos.get("entry_atr")
+            highest_price = pos.get("highest_price") or avg_price
+
+            # highest_price 갱신
+            if price > highest_price:
+                highest_price = price
+                supabase.table("virtual_positions").update(
+                    {"highest_price": price}
+                ).eq("id", pos["id"]).execute()
+
+            # ATR 하드 스탑: 진입가 - 1.5 × entry_atr
+            if entry_atr and price < avg_price - 1.5 * entry_atr:
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "atr_hard_stop", None)
+                continue
+
+            # ATR 트레일링 스탑: 최고가 - 2.0 × 현재 ATR
+            if atr_val and price < highest_price - 2.0 * atr_val:
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "atr_trailing_stop", None)
+                continue
+
+            # RSI 모멘텀 소멸: 70 위에서 70 아래로 하향
+            if len(closes) >= 16:
+                rsi_curr = rsi(closes, 14)
+                rsi_prev = rsi(closes[:-1], 14)
+                if (rsi_prev is not None and rsi_curr is not None
+                        and rsi_prev > 70 and rsi_curr <= 70):
+                    account = get_account(account["id"])
+                    _execute_sell(account, pos, price, "rsi_exhaustion", None)
+                    continue
+
+        # ── Engine B 청산 ───────────────────────────────────────────────────────
+        elif engine == "B":
+            entry_date  = pos.get("entry_date", "")
+            half_exited = pos.get("half_exited", False)
+            entry_low   = pos.get("entry_low")
+
+            holding_bars = 0
+            if entry_date:
+                try:
+                    holding_bars = (today - date.fromisoformat(entry_date)).days
+                except (ValueError, TypeError):
+                    pass
+
+            # 진입 저점 이탈 손절
+            if entry_low and price < entry_low:
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "entry_low_breach", None)
+                continue
+
+            # 보유 기간 초과 + 손실 → 기회비용 청산
+            if holding_bars >= 5 and price <= avg_price:
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "time_limit_stop", None)
+                continue
+
+            # MA20 첫 터치 → 분할 익절 (50%)
+            if (not half_exited and ma20 is not None
+                    and len(closes) >= 2 and closes[-2] < ma20 <= price):
+                half_qty = max(1, pos["quantity"] // 2)
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "ma20_half_exit", None, quantity=half_qty)
+                continue
+
+            # 이격도 ≥ 102% 또는 RSI ≥ 60 → 전량 익절
+            disparity = price / ma20 * 100 if (ma20 and ma20 > 0) else 0
+            rsi_val   = rsi(closes, 14)
+            if disparity >= 102 or (rsi_val is not None and rsi_val >= 60):
+                account = get_account(account["id"])
+                _execute_sell(account, pos, price, "target_reached", None)
+                continue
 
 
 # ── 수동 체결 ─────────────────────────────────────────────────────────────────

@@ -12,6 +12,34 @@ from app.services.ichimoku import calculate as ichimoku_calculate
 
 logger = logging.getLogger(__name__)
 
+
+async def _fetch_market_regime() -> str:
+    """KOSPI MA20 기반 시장 국면 판단. 종가 >= MA20 → BULL, 미달 → BEAR."""
+    try:
+        today = today_kst()
+        end_kis   = today.strftime("%Y%m%d")
+        start_kis = (today - timedelta(days=45)).strftime("%Y%m%d")
+        data = await kis_client.get_index_chart("0001", start_kis, end_kis, "D")
+        output2 = data.get("output2") or []
+        closes = []
+        for item in reversed(output2):          # output2는 최신순 → 역순으로 오름차순 변환
+            v = item.get("bstp_nmix_prpr")
+            if v:
+                try:
+                    closes.append(float(v))
+                except (ValueError, TypeError):
+                    pass
+        if len(closes) < 20:
+            logger.warning(f"KOSPI 데이터 부족({len(closes)}일), BULL 기본값 사용")
+            return "BULL"
+        ma20 = sum(closes[-20:]) / 20
+        regime = "BULL" if closes[-1] >= ma20 else "BEAR"
+        logger.info(f"시장 레짐: {regime} (KOSPI {closes[-1]:.2f} vs MA20 {ma20:.2f})")
+        return regime
+    except Exception as e:
+        logger.warning(f"시장 레짐 조회 실패: {e}, BULL 기본값 사용")
+        return "BULL"
+
 # ── 상수 ──────────────────────────────────────────────────────────────────────
 MEANINGFUL_SCORE_THRESHOLD = 20   # 기술 점수 최소 임계값
 MIN_PRICE = 1_000                  # 동전주 필터링 기준 (원)
@@ -121,6 +149,8 @@ async def update_recommendations() -> list[dict]:
     today_iso     = today_str                                # alias
     start_date_iso = (today - timedelta(days=130)).isoformat()
 
+    market_regime = await _fetch_market_regime()
+
     # ── 1. 5개 조건 병렬 수집 → ETF·동전주 필터 → rank_map 구성 ────────────────
     # A: 거래대금  B: 기관·외인 순매수  C: 거래량  D: 신고가근접  E: VI발동
     rank_map:   dict[str, dict]     = {}
@@ -215,7 +245,7 @@ async def update_recommendations() -> list[dict]:
             cloud_position = ichimoku_calculate(highs, lows, closes).get("position", "unknown")
         except Exception:
             cloud_position = "unknown"
-        return technical.analyze(records, cloud_position=cloud_position)
+        return technical.analyze(records, cloud_position=cloud_position, market_regime=market_regime)
 
     tech_map: dict[str, dict] = {
         code: _analyze_with_ichimoku(code)

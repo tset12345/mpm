@@ -3,7 +3,7 @@
 기술적·기본적·자산관리 관점에서 매도 점수(0-100)와 매도 가격대를 계산한다.
 """
 
-from app.services.technical import sma, rsi, stochastic, ema_series, _rma
+from app.services.technical import sma, rsi, stochastic, ema_series, _rma, atr as calc_atr
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +100,13 @@ def analyze_sell(
     eps: float | None = None,
     w52_high: int | None = None,
     portfolio_weight: float | None = None,
+    # 엔진별 매도 신호 파라미터
+    engine: str | None = None,
+    entry_atr: int | None = None,       # Engine A: 매수 시점 ATR
+    highest_price: int | None = None,   # Engine A: 보유 중 최고가 (트레일링 스탑 기준)
+    holding_bars: int = 0,              # Engine B: 보유 봉 수
+    half_exited: bool = False,          # Engine B: 분할 익절(MA20 첫 터치) 완료 여부
+    entry_low: int | None = None,       # Engine B: 매수 당일 저가 (손절 기준)
 ) -> dict:
     """
     Returns:
@@ -171,7 +178,64 @@ def analyze_sell(
                 "MACD선이 시그널선을 하향 돌파했습니다.", 10)
 
     # ------------------------------------------------------------------
-    # 2. 기본적 신호
+    # 2. 엔진별 매도 신호
+    # ------------------------------------------------------------------
+    if engine == "A" and cp:
+        atr_val = calc_atr(highs, lows, closes, 14) if len(closes) >= 15 else None
+
+        # 2-A-1. ATR 하드 스탑 (진입가 - 1.5 × entry_atr)
+        if entry_atr is not None and cp < avg_price - 1.5 * entry_atr:
+            add("엔진A", "ATR 하드 스탑",
+                f"현재가({cp:,})가 ATR 손절선({int(avg_price - 1.5 * entry_atr):,}) 아래입니다. 즉시 손절하세요.", 40)
+
+        # 2-A-2. ATR 트레일링 스탑 (최고가 - 2.0 × 현재 ATR)
+        if highest_price is not None and atr_val is not None:
+            trail_line = highest_price - 2.0 * atr_val
+            if cp < trail_line:
+                add("엔진A", "ATR 트레일링 스탑",
+                    f"현재가({cp:,})가 트레일링 스탑({int(trail_line):,}) 아래입니다. 수익 보존 매도를 검토하세요.", 30)
+
+        # 2-A-3. RSI 모멘텀 소멸 (70 위에서 70 아래로 하향)
+        if len(closes) >= 16:
+            rsi_curr = rsi(closes, 14)
+            rsi_prev = rsi(closes[:-1], 14)
+            if (rsi_prev is not None and rsi_curr is not None
+                    and rsi_prev > 70 and rsi_curr <= 70):
+                add("엔진A", "RSI 모멘텀 소멸",
+                    f"RSI가 과매수(70+)에서 하락 전환({rsi_curr:.1f}) — 추세 둔화 신호입니다.", 25)
+
+    elif engine == "B" and cp:
+        ma20 = sma(closes, 20)
+        rsi_val = rsi(closes, 14) if len(closes) >= 15 else None
+        disparity = cp / ma20 * 100 if (ma20 and ma20 > 0) else None
+
+        # 2-B-1. 보유 기간 초과 + 손실 구간 — 기회비용 청산
+        if holding_bars >= 5 and cp <= avg_price:
+            add("엔진B", "보유 기간 손절",
+                f"{holding_bars}봉 보유 중 주가가 진입가({avg_price:,}) 미달 — 기회비용 손절을 검토하세요.", 30)
+
+        # 2-B-2. MA20 목표 도달 (분할 익절)
+        if not half_exited and ma20 is not None and closes and len(closes) >= 2:
+            prev_close = closes[-2]
+            if prev_close < ma20 <= cp:
+                add("엔진B", "MA20 목표 도달 (분할 익절)",
+                    f"주가가 MA20({int(ma20):,})에 최초 도달 — 보유량 50% 분할 매도를 검토하세요.", 20)
+
+        # 2-B-3. 이격도/RSI 목표 초과 — 전량 익절
+        if disparity is not None and disparity >= 102:
+            add("엔진B", "이격도 목표 초과",
+                f"이격도 {disparity:.1f}% (MA20 대비 +2%) — 반등 목표 도달, 전량 익절을 검토하세요.", 20)
+        elif rsi_val is not None and rsi_val >= 60:
+            add("엔진B", "RSI 목표 도달",
+                f"RSI {rsi_val:.1f} ≥ 60 — 역추세 반등 완료 구간입니다.", 15)
+
+        # 2-B-4. 진입 저점 이탈 — 전략 실패 손절
+        if entry_low is not None and cp < entry_low:
+            add("엔진B", "진입 저점 이탈 손절",
+                f"현재가({cp:,})가 진입 당일 저가({entry_low:,}) 아래 — 전략 전제 붕괴, 즉시 손절하세요.", 40)
+
+    # ------------------------------------------------------------------
+    # 3. 기본적 신호
     # ------------------------------------------------------------------
     if per is not None and per > 0:
         if per > 80:
@@ -193,7 +257,7 @@ def analyze_sell(
                 f"PBR {pbr:.2f}배 — 장부가 대비 높은 편입니다.", 5)
 
     # ------------------------------------------------------------------
-    # 3. 자산 관리 신호
+    # 4. 자산 관리 신호
     # ------------------------------------------------------------------
     if cp:
         gain_pct = (cp - avg_price) / avg_price * 100
@@ -224,7 +288,7 @@ def analyze_sell(
                 f"현재 비중 {portfolio_weight:.1f}% — 25% 초과입니다.", 8)
 
     # ------------------------------------------------------------------
-    # 점수 산정 및 등급
+    # 5. 점수 산정 및 등급
     # ------------------------------------------------------------------
     sell_score = min(100, total_pts)
 
