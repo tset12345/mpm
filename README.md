@@ -49,7 +49,7 @@ mpm/
 │       │   ├── portfolio.py        # AI 포트폴리오 분석 엔드포인트
 │       │   ├── analysis.py         # 퀀트·배당 전략 분석 엔드포인트
 │       │   └── virtual.py          # 가상 거래 계좌·포지션·체결내역 엔드포인트
-│       │   └── market.py           # 시장 현황 (트리맵·지수차트·수급·ADR·스파크라인)
+│       │   └── market.py           # 시장 현황 (지수 카드·랭킹·트리맵·지수차트·수급·ADR·스파크라인)
 │       └── services/
 │           ├── kis_api.py          # KIS Open API 클라이언트 (토큰·가격·OHLCV·거래량)
 │           ├── gemini.py           # Gemini AI 포트폴리오 분석 서비스
@@ -89,8 +89,9 @@ mpm/
 │       │       ├── StockTable.tsx           # 종목 테이블
 │       │       └── FavoriteButton.tsx       # 즐겨찾기 버튼
 │   ├── market/
-│   │   ├── MarketDashboard.tsx     # 지수 차트 + MA + ADR + 수급 패널
-│   │   └── TreemapHeatmap.tsx      # Squarified 트리맵 히트맵
+│   │   ├── MarketDashboard.tsx     # 8개 지수 카드 + 수급 현황 (대시보드 탭)
+│   │   ├── MarketRankings.tsx      # 주도주 8개 카테고리 랭킹 (랭킹 탭)
+│   │   └── TreemapHeatmap.tsx      # Squarified 트리맵 히트맵 (히트맵 탭)
 │   └── LogoutButton.tsx            # 로그아웃 버튼 (네비게이션 바)
 │       ├── hooks/
 │       │   ├── useFavorites.ts     # 즐겨찾기 로컬스토리지 훅
@@ -261,6 +262,8 @@ cp backend/.env.example backend/.env
 
 | Method | Path | 설명 |
 |--------|------|------|
+| `GET` | `/api/v1/market/indices` | 8개 지수 현재값 (KOSPI/KOSDAQ/NASDAQ/다우/S&P500/USD-KRW/WTI/미국10년물, 1분 캐시) |
+| `GET` | `/api/v1/market/rankings` | 주도주 8개 카테고리 랭킹 (상승률·하락률·거래량·거래대금·외인·기관·52주신고가·신저가, 2분 캐시) |
 | `GET` | `/api/v1/market/treemap` | 트리맵 히트맵 데이터 (3분 캐시, `sort` 파라미터) |
 | `GET` | `/api/v1/market/index-chart` | KOSPI/KOSDAQ 지수 차트 (`market`, `period` 파라미터) |
 | `GET` | `/api/v1/market/investor-trend` | 기관·외국인·개인 수급 집계 |

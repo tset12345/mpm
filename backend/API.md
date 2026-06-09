@@ -1355,6 +1355,12 @@ FastAPI 시작 시 싱글턴 `kis_client` 인스턴스 생성. 첫 API 호출 �
 | `get_stock_price(stock_code)` | `FHKST01010100` | 현재가·PER·PBR·EPS·BPS·ROE 조회 |
 | `get_daily_ohlcv(stock_code, start, end)` | `FHKST03010100` | 일별 OHLCV 차트 조회 |
 | `get_volume_ranking()` | `FHPST01700000` | 거래량 순위 조회 (실서버 전용) |
+| `get_trading_amount_ranking()` | `FHPST01700000` | 거래대금 순위 조회 |
+| `get_foreign_net_buy_ranking()` | `FHPTJ04400000` | 외국인 순매수 상위 종목 (`fid_etc_cls_code=1`) |
+| `get_institution_net_buy_ranking()` | `FHPTJ04400000` | 기관 순매수 상위 종목 (`fid_etc_cls_code=2`) |
+| `get_institution_foreign_net_buy_ranking()` | `FHPTJ04400000` | 기관·외국인 합산 순매수 (수급 현황용, `fid_etc_cls_code=0`) |
+| `get_52week_high_low(div_cls)` | `FHPST01870000` | 52주 신고가(`"1"`) 또는 신저가(`"2"`) 종목 |
+| `get_index_chart(market, start, end, period)` | `FHKUP03500100` | 지수 차트 (output1: 현재값, output2: 차트 시계열) |
 
 ---
 
@@ -1383,6 +1389,101 @@ FastAPI 시작 시 싱글턴 `kis_client` 인스턴스 생성. 첫 API 호출 �
 - 소스: `kind.krx.co.kr` HTML 다운로드 (EUC-KR 인코딩)
 - KOSPI(`stockMkt`) + KOSDAQ(`kosdaqMkt`) 각각 요청
 - HTMLParser로 테이블 파싱 → `stock_master` 테이블 500건 단위 upsert
+
+---
+
+## 시장 현황 (Market)
+
+### GET /api/v1/market/indices
+
+8개 주요 시장 지표를 반환합니다. in-memory 1분 캐시.
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "kospi":     { "label": "KOSPI",      "price": 2850.12, "change": 12.34, "change_rate": 0.44, "sign": "2" },
+    "kosdaq":    { "label": "KOSDAQ",     "price": 840.55,  "change": -2.10, "change_rate": -0.25, "sign": "4" },
+    "nasdaq":    { "label": "NASDAQ",     "price": 19234.56,"change": 88.40, "change_rate": 0.46, "sign": "2" },
+    "dow":       { "label": "다우존스",   "price": 42100.00,"change": -30.0, "change_rate": -0.07, "sign": "4" },
+    "sp500":     { "label": "S&P 500",    "price": 5820.10, "change": 15.20, "change_rate": 0.26, "sign": "2" },
+    "usd_krw":   { "label": "USD/KRW",   "price": 1380.50, "change": 2.30,  "change_rate": 0.17, "sign": "2" },
+    "crude_oil": { "label": "WTI 유가",  "price": 78.45,   "change": -0.62, "change_rate": -0.78, "sign": "4" },
+    "us10y":     { "label": "미국 10년물","price": 4.32,    "change": 0.05,  "change_rate": 1.17, "sign": "2" }
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `*.label` | string | 지수 표시명 |
+| `*.price` | number \| null | 현재 값 (조회 실패 시 null) |
+| `*.change` | number \| null | 전일 대비 변동 |
+| `*.change_rate` | number \| null | 전일 대비 등락률 (%) |
+| `*.sign` | string | `"1"/"2"` 상승, `"3"` 보합, `"4"/"5"` 하락 |
+
+**데이터 소스**
+
+| 지수 | 소스 | 심볼 |
+|------|------|------|
+| KOSPI, KOSDAQ | KIS API `FHKUP03500100` output1 | `0001`, `1001` |
+| NASDAQ, 다우존스, S&P 500 | Yahoo Finance | `^IXIC`, `^DJI`, `^GSPC` |
+| USD/KRW, WTI 유가, 미국 10년물 | Yahoo Finance | `KRW=X`, `CL=F`, `^TNX` |
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 (일부 지수 조회 실패 시에도 200, 해당 필드 null) |
+
+---
+
+### GET /api/v1/market/rankings
+
+주도주 8개 카테고리의 상위 N개 종목을 반환합니다. in-memory 2분 캐시.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 기본값 | 최대 | 설명 |
+|----------|------|--------|------|------|
+| `limit` | integer | 5 | 20 | 카테고리별 반환 종목 수 |
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "rise": [
+      { "stock_code": "012450", "stock_name": "한화에어로스페이스", "current_price": 1041000, "change_rate": 8.2, "volume": 382000, "amount": 398000000000 }
+    ],
+    "fall": [ ... ],
+    "volume": [ ... ],
+    "amount": [ ... ],
+    "foreign_buy": [
+      { "stock_code": "005930", "stock_name": "삼성전자", "current_price": 75000, "change_rate": 1.1, "net_buy": 1520000 }
+    ],
+    "institution_buy": [ ... ],
+    "high_52w": [
+      { "stock_code": "012450", "stock_name": "한화에어로스페이스", "current_price": 1041000, "change_rate": 8.2, "high_52w": 1050000, "low_52w": 420000 }
+    ],
+    "low_52w": [ ... ]
+  }
+}
+```
+
+| 카테고리 | 지표 필드 | 설명 |
+|----------|-----------|------|
+| `rise` / `fall` / `volume` | `volume`, `amount` | 거래량·거래대금 포함 |
+| `amount` | `volume`, `amount` | 거래대금 기준 정렬 |
+| `foreign_buy` / `institution_buy` | `net_buy` | 순매수(주) |
+| `high_52w` / `low_52w` | `high_52w`, `low_52w` | 52주 신고가·신저가 |
+
+**공통 필드** (모든 카테고리): `stock_code`, `stock_name`, `current_price`, `change_rate`
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 (KIS API 실패 시에도 캐시 있으면 200, 없으면 `status: error`) |
 
 ---
 
