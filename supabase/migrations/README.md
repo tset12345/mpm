@@ -41,5 +41,6 @@ NNN_설명.sql
 | 018_favorites.sql | favorites 테이블 생성 | - |
 | 019_virtual_trading.sql | virtual_accounts, virtual_positions, virtual_trades 테이블 생성 | 2026-06-04 |
 | 020_enable_rls.sql | 전체 14개 테이블 RLS 활성화 (anon 키 기본 거부) | 2026-06-04 |
+| 021_virtual_position_tracking.sql | virtual_positions에 entry_atr·highest_price·half_exited·entry_low 컬럼 추가 | 2026-06-09 |
 
 > **주의**: Supabase는 직접 DB 연결(psycopg2)이 차단되어 있어 코드에서 DDL 자동 실행 불가. 반드시 Dashboard에서 수동 실행.

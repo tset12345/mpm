@@ -1190,6 +1190,10 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
       "entry_date": "2026-05-20",
       "entry_score": 82,
       "engine": "A",
+      "entry_atr": 1850,
+      "highest_price": 76000,
+      "half_exited": false,
+      "entry_low": 67400,
       "current_price": 74200,
       "profit_loss": 168000,
       "profit_rate": 8.16
@@ -1238,7 +1242,7 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 
 | 필드 | 설명 |
 |------|------|
-| `trigger_type` | `algo_buy` / `stop_loss` / `take_profit` / `sell_signal` / `manual` |
+| `trigger_type` | 매수: `algo_buy` / `manual` · 매도(공통): `stop_loss` / `take_profit` · 매도(A): `atr_hard_stop` / `atr_trailing_stop` / `rsi_exhaustion` · 매도(B): `entry_low_breach` / `time_limit_stop` / `ma20_half_exit` / `target_reached` |
 | `pnl` | 실현손익 (매도 시). 매수 시 `null` |
 | `pnl_rate` | 수익률 (%). 매도 시만 |
 
@@ -1310,39 +1314,64 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 
 ### 기술적 분석 엔진 (`services/technical.py`)
 
-`analyze(records, cloud_position) → {"score": int, "tags": list, "signals": dict, "score_detail": dict, "strength": str}`
+`analyze(records, cloud_position, market_regime) → {"score": int, "engine": str, "engine_a_score": int, "engine_b_score": int, "tags": list, "signals": dict, "strength": str}`
 
-**스코어링: 4개 카테고리 × 최대 10점 = 40점 → ×2.5 → 0–100 환산**
+**듀얼 엔진 구조**: `score = max(engine_a_score, engine_b_score)`. 이기는 엔진의 tags 채택.
 
-| 카테고리 | 내용 | 최대 점수 |
-|----------|------|-----------|
-| **A. 추세 (Trend)** | 이동평균 골든크로스, MA20/MA60 위치, 일목균형표 구름대 위치 | 10 |
-| **B. 모멘텀 (Momentum)** | MACD 교차 및 방향, RSI 과매도 탈출/수준, 스토캐스틱 | 10 |
-| **C. 변동성 (Volatility)** | 볼린저밴드 위치, 이격도, 전고점 돌파, 피보나치 되돌림 지지 (38.2%/50%/61.8%) | 10 |
-| **D. 거래량 (Volume)** | 거래량 급증, 이동평균 대비 거래량, 거래량 추세 | 10 |
+| 파라미터 | 타입 | 설명 |
+|----------|------|------|
+| `records` | list[dict] | OHLCV (stck_clpr/hgpr/lwpr/acml_vol), 오름차순 |
+| `cloud_position` | str | `"above_cloud"` / `"in_cloud"` / `"below_cloud"` / `"unknown"` |
+| `market_regime` | str | `"BULL"` / `"BEAR"` — KOSPI MA20 기반, 기본값 `"BULL"` |
 
-`signals` 딕셔너리에 포함된 주요 피보나치 지지 필드:
+**Stage 1 — Hard Filter**: MA20 거래량 < 100,000주 → score=0 즉시 탈락.
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `fib_level` | float \| null | 피보나치 되돌림 지지 레벨 (원). 현재가 근접 시 non-null |
-| `fib_ratio` | float \| null | 해당 레벨의 되돌림 비율 (0.382 / 0.500 / 0.618). 61.8% = 황금비율(+2점) |
+**Engine A — 추세 돌파형 (max 100pt)**
 
-`strength` 값:
-- `"강세"`: score ≥ 60
-- `"중립"`: 40 ≤ score < 60
-- `"약세"`: score < 40
+BEAR 시장(`market_regime="BEAR"`) 즉시 0점.
+
+| 항목 | 배점 |
+|------|------|
+| 골든크로스 (MA5>MA20>MA60 정배열 → 15 / MA5>MA20 → 8) | max 15 |
+| ADX/DMI 강한 상승추세 (ADX≥25 → 15 / ≥20 → 10) | max 15 |
+| 일목 구름대 돌파 (above_cloud → 15 / in_cloud → 5) | max 15 |
+| 볼린저 스퀴즈 상단돌파 (밴드폭<10%+상단 → 15 / 중간> → 6) | max 15 |
+| 전고점 돌파 (21일 고점+거래량≥1.5× → 15 / 미충족 → 8) | max 15 |
+| OBV 선행 돌파 (OBV>고점+주가≤고점 → 15 / OBV>고점만 → 8) | max 15 |
+| 거래량 급증 (≥3.0×+양봉 → 10 / ≥2.0× → 7 / ≥1.5× → 3) | max 10 |
+| RSI Hard Veto: ≥80 → **즉시 0점** | — |
+| RSI 최초 70 돌파(직전<70): +5 | — |
+| RSI 지속 70+: max(0, score−10) | — |
+
+**Engine B — 역추세 반등형 (max 100pt)**
+
+Pre-filter: 거래대금<50억 또는 MA60 우하향 → 즉시 0점.
+
+**B1 (disparity < 99)**: (이격도 + 과매도 + 수요밴드) / 75 × 100
+
+**B2 (disparity ≥ 99)**: (과매도 + 수요밴드 + 눌림목) / 85 × 100
+
+| 항목 | B1 | B2 | 배점 |
+|------|:---:|:---:|------|
+| 이격도 저점 (<93%→15 / <95%→12 / <97%→8 / <99%→3) | ✓ | — | max 15 |
+| 과매도 그룹 RSI/Stoch/CCI/MFI (≥3→25 / ≥2→20 / 1→10) | ✓ | ✓ | max 25 |
+| 수요밴드 통합 볼린저·엔벨로프·피봇S2·피보나치 (≥2+양봉→35 …) | ✓ | ✓ | max 35 |
+| 눌림목 반등 (MA5>MA20+MA20터치+양봉→25 / 미충족→12) | — | ✓ | max 25 |
+
+`strength` 값: `"매우 강함"` (≥75) / `"강함"` (≥50) / `"보통"` (≥25) / `"약함"` (<25)
 
 ---
 
 ### 매도 신호 분석 (`services/sell_signal.py`)
 
-`analyze_sell(records, avg_price, current_price, per, pbr, eps, w52_high, portfolio_weight)`
+`analyze_sell(records, avg_price, current_price, per, pbr, eps, w52_high, portfolio_weight, engine, entry_atr, highest_price, holding_bars, half_exited, entry_low)`
 
-3개 관점 통합 분석:
+5개 관점 통합 분석:
 - **기술적**: 데드크로스, RSI 과매수(>70), 볼린저 상단 이탈, MACD 하향 교차
-- **기본적**: PER/PBR 과열, 52주 신고가 대비 고점 근접
-- **자산관리**: 단일 종목 비중 30% 초과, 수익률 목표 달성(+20% 이상)
+- **엔진A**: ATR 하드 스탑(진입가−1.5×ATR), ATR 트레일링 스탑(최고가−2.0×ATR), RSI 모멘텀 소멸(70→이하 하향)
+- **엔진B**: 보유 기간 손절(5봉+손실), MA20 최초 터치 분할 익절, 이격도≥102%/RSI≥60 목표 도달, 진입 저점 이탈
+- **기본적**: PER/PBR 과열
+- **자산관리**: 단일 종목 비중 초과, 손절(-5%/-10%), 트레일링 스탑(-7%)
 
 ---
 

@@ -53,7 +53,7 @@ mpm/
 │       └── services/
 │           ├── kis_api.py          # KIS Open API 클라이언트 (토큰·가격·OHLCV·거래량)
 │           ├── gemini.py           # Gemini AI 포트폴리오 분석 서비스
-│           ├── technical.py        # 기술적 지표 스코어링 엔진 (4카테고리 × 10점)
+│           ├── technical.py        # 듀얼 엔진 기술 분석 (Engine A 추세·Engine B 역추세, max 100pt)
 │           ├── ichimoku.py         # 일목균형표 계산 서비스
 │           ├── recommendations.py  # OHLCV 기술 분석 기반 추천 종목 생성
 │           ├── ohlcv_sync.py       # KIS → stock_ohlcv 테이블 동기화
@@ -429,6 +429,10 @@ KOSPI 838건 + KOSDAQ 1,819건 = 약 2,657건 보관.
 | `entry_date` | DATE | 매수일 |
 | `entry_score` | INTEGER | 매수 시점 기술 점수 |
 | `engine` | TEXT | 매수 엔진 (`A` / `B`) |
+| `entry_atr` | INTEGER | 매수 시점 ATR (Engine A ATR 스탑 계산용) |
+| `highest_price` | INTEGER | 보유 중 최고가 (Engine A 트레일링 스탑 기준) |
+| `half_exited` | BOOLEAN | Engine B MA20 분할 익절 완료 여부 (기본 false) |
+| `entry_low` | INTEGER | 매수 당일 저가 (Engine B 진입 저점 손절 기준) |
 
 UNIQUE 제약: `(account_id, stock_code)`.
 
@@ -444,7 +448,7 @@ UNIQUE 제약: `(account_id, stock_code)`.
 | `quantity` | INTEGER | 체결 수량 |
 | `price` | INTEGER | 체결가 |
 | `amount` | INTEGER | 체결금액 (price × quantity) |
-| `trigger_type` | TEXT | `algo_buy` / `stop_loss` / `take_profit` / `sell_signal` / `manual` |
+| `trigger_type` | TEXT | 매수: `algo_buy`/`manual` · 매도(공통): `stop_loss`/`take_profit` · 매도(A): `atr_hard_stop`/`atr_trailing_stop`/`rsi_exhaustion` · 매도(B): `entry_low_breach`/`time_limit_stop`/`ma20_half_exit`/`target_reached` |
 | `engine` | TEXT | 엔진 (`A` / `B`) |
 | `tech_score` | INTEGER | 체결 시 기술 점수 |
 | `sell_score` | INTEGER | 매도 신호 점수 (매도 시) |
@@ -483,6 +487,7 @@ UNIQUE 제약: `(account_id, stock_code)`.
 018_favorites.sql               → favorites
 019_virtual_trading.sql         → virtual_accounts, virtual_positions, virtual_trades
 020_enable_rls.sql              → 전체 테이블 RLS 활성화
+021_virtual_position_tracking.sql → virtual_positions에 entry_atr·highest_price·half_exited·entry_low 추가
 ```
 
 ### RLS(Row Level Security)
@@ -544,6 +549,7 @@ technical.analyze() — 듀얼 엔진 스코어링, score = max(engine_a, engine
   · MA20 거래량 < 100,000주 → 즉시 탈락 (score=0)
 
   [Engine A — 추세 돌파형, max 100pt]
+  BEAR 시장 (KOSPI < MA20) → 즉시 0점
   · 골든크로스 (MA5>MA20>MA60 정배열 → 15 / MA5>MA20만 → 8)           max 15
   · ADX/DMI 강한 상승추세 (ADX≥25 → 15 / ADX≥20 → 10)                max 15
   · 일목 구름대 돌파 (above_cloud → 15 / in_cloud → 5)                  max 15
@@ -551,13 +557,18 @@ technical.analyze() — 듀얼 엔진 스코어링, score = max(engine_a, engine
   · 전고점 돌파 (21일 고점+거래량≥1.5× → 15 / 거래량 미충족 → 8)       max 15
   · OBV 선행 돌파 (OBV>고점+주가≤고점 → 15 / OBV>고점만 → 8)          max 15
   · 거래량 급증 (≥3.0×+양봉 → 10 / ≥2.0× → 7 / ≥1.5× → 3)           max 10
-  · Soft Veto: RSI≥70 → max(0, score−10)
+  · RSI Hard Veto: ≥80 → 즉시 0점
+  · RSI 최초 70 돌파 (직전<70): +5
+  · RSI 지속 70+: max(0, score−10)
 
   [Engine B — 역추세 반등형, max 100pt]
+  Pre-filter: 거래대금<50억 또는 MA60 우하향 → 즉시 0점
+  B1 (disparity < 99): (이격도 + 과매도 + 수요밴드) / 75 × 100
   · 이격도 저점 (<93%→15 / <95%→12 / <97%→8 / <99%→3)               max 15
   · 과매도 그룹 RSI/Stoch/CCI/MFI (≥3개→25 / ≥2개→20 / 1개→10)       max 25
   · 수요밴드 통합 (볼린저하단·엔벨로프하단·피봇S2·피보나치,
     ≥2개+양봉→35 / ≥2개→20 / 1개+양봉→20 / 1개→8)                    max 35
+  B2 (disparity ≥ 99): (과매도 + 수요밴드 + 눌림목) / 85 × 100
   · 눌림목 반등 (MA5>MA20+MA20터치+양봉→25 / 양봉 미충족→12)           max 25
         │
         ▼
