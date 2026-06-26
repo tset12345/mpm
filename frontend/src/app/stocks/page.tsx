@@ -458,6 +458,26 @@ export default function StocksPage() {
                     <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="정배열">MA {s.score_detail.ma_aligned}</span>
                     <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded" title="시가총액">시총 {s.score_detail.mktcap}</span>
                   </div>
+                  {(s.tech_score ?? 0) > 0 && (
+                    <div className="flex gap-1 flex-wrap text-[10px] mt-1">
+                      <span className={`font-bold px-1.5 py-0.5 rounded ${
+                        (s.tech_score ?? 0) >= 60 ? "bg-red-100 text-red-700" :
+                        (s.tech_score ?? 0) >= 40 ? "bg-orange-100 text-orange-700" :
+                        "bg-yellow-100 text-yellow-700"
+                      }`} title="기술 분석 점수">
+                        분석 {s.tech_score}
+                      </span>
+                      {(s.engine_a_score ?? 0) > 0 && (
+                        <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded" title="Engine A (추세)">A {s.engine_a_score}</span>
+                      )}
+                      {(s.engine_b_score ?? 0) > 0 && (
+                        <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded" title="Engine B (역추세)">B {s.engine_b_score}</span>
+                      )}
+                      {(s.tech_tags ?? []).map((tag) => (
+                        <span key={tag} className="bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded">#{tag}</span>
+                      ))}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

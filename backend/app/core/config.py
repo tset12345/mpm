@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     enable_scheduler: bool = False   # 일일 동기화 + 섹터주도주 (Render)
     enable_intraday: bool = False    # 장중 10분 매매 트리거 (Local only)
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    enable_telegram: bool = False    # 텔레그램 알림 (Local only, Render 배포 제외)
 
     class Config:
         env_file = ".env"

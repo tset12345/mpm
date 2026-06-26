@@ -262,14 +262,21 @@ export interface VirtualAccount {
   name: string;
   initial_cash: number;
   current_cash: number;
-  strategy: "engine_a" | "engine_b" | "both";
+  strategy: "engine_a" | "engine_b" | "both" | "both_and";
   min_score: number;
+  max_score: number | null;
+  score_filter_type: "gte" | "lte" | "range";
   max_positions: number;
   position_size: number;
   stop_loss_pct: number;
   take_profit_pct: number;
   is_active: boolean;
   created_at: string;
+  filter_excl_large_cap: boolean;
+  filter_large_cap_threshold: number | null;
+  filter_excl_high_amount: boolean;
+  filter_high_amount_threshold: number | null;
+  max_hold_days: number | null;
 }
 
 export interface VirtualPosition {
@@ -345,6 +352,10 @@ export interface SectorLeaderStock {
   ma20: number | null;
   ma60: number | null;
   ma_aligned: boolean;
+  tech_score?: number;
+  engine_a_score?: number;
+  engine_b_score?: number;
+  tech_tags?: string[];
 }
 
 // ── Market types ──────────────────────────────────────────────────────────────

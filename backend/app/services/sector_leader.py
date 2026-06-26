@@ -18,6 +18,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.services import technical
+from app.services.ichimoku import calculate as ichimoku_calculate
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +236,7 @@ async def _fetch_stock_snapshot_inner(stock_code: str) -> dict | None:
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 
-async def get_sector_leaders(sector: str) -> list[dict]:
+async def get_sector_leaders(sector: str, market_regime: str = "BULL") -> list[dict]:
     """
     섹터 내 종목을 채점하여 상위 3개를 반환한다.
     각 항목에 rank(1~3), score(0~100), score_detail, tags가 포함된다.
@@ -274,12 +276,12 @@ async def get_sector_leaders(sector: str) -> list[dict]:
             snap["stock_name"] = name_map[code]
         snap["market"] = market_map.get(code)
 
-    # ── 3. OHLCV DB 조회 (MA 계산용) ─────────────────────────────────────────
-    start_iso = (date.today() - timedelta(days=90)).isoformat()
+    # ── 3. OHLCV DB 조회 (MA + 기술 분석용) ──────────────────────────────────
+    start_iso = (date.today() - timedelta(days=130)).isoformat()
     try:
         rows = (
             supabase.table("stock_ohlcv")
-            .select("stock_code,close_price,trade_date")
+            .select("stock_code,high_price,low_price,close_price,volume,trade_date")
             .in_("stock_code", valid_codes)
             .gte("trade_date", start_iso)
             .order("trade_date")
@@ -289,15 +291,17 @@ async def get_sector_leaders(sector: str) -> list[dict]:
         logger.warning(f"[sector_leader] DB 조회 실패: {e}")
         rows = []
 
-    ohlcv_by_code: dict[str, list[float]] = {c: [] for c in valid_codes}
+    ohlcv_by_code: dict[str, list[dict]] = {c: [] for c in valid_codes}
     for row in rows:
         code = row["stock_code"]
-        if code in ohlcv_by_code and row.get("close_price"):
-            ohlcv_by_code[code].append(float(row["close_price"]))
+        if code in ohlcv_by_code:
+            ohlcv_by_code[code].append(row)
 
-    # ── 4. MA 계산 및 정배열 판정 ─────────────────────────────────────────────
+    # ── 4. MA 계산, 정배열 판정, 기술 점수 산출 ──────────────────────────────
     for code, snap in snapshot.items():
-        closes = ohlcv_by_code.get(code, [])
+        db_rows = ohlcv_by_code.get(code, [])
+        closes  = [float(r["close_price"]) for r in db_rows if r.get("close_price")]
+
         ma5  = _calc_ma(closes, 5)
         ma20 = _calc_ma(closes, 20)
         ma60 = _calc_ma(closes, 60)
@@ -308,6 +312,33 @@ async def get_sector_leaders(sector: str) -> list[dict]:
             ma5 is not None and ma20 is not None and ma60 is not None
             and ma5 > ma20 > ma60
         )
+
+        # 기술 분석 점수 (추천 알고리즘과 동일)
+        if len(db_rows) >= 30:
+            records = [
+                {
+                    "stck_clpr": str(r["close_price"]),
+                    "stck_hgpr": str(r["high_price"]),
+                    "stck_lwpr": str(r["low_price"]),
+                    "acml_vol":  str(r["volume"]),
+                }
+                for r in db_rows
+            ]
+            highs_list  = [float(r["stck_hgpr"]) for r in records]
+            lows_list   = [float(r["stck_lwpr"]) for r in records]
+            closes_list = [float(r["stck_clpr"]) for r in records]
+            try:
+                cloud_pos = ichimoku_calculate(highs_list, lows_list, closes_list).get("position", "unknown")
+            except Exception:
+                cloud_pos = "unknown"
+            ta = technical.analyze(records, cloud_position=cloud_pos, market_regime=market_regime)
+        else:
+            ta = {"score": 0, "engine_a_score": 0, "engine_b_score": 0, "tags": []}
+
+        snap["tech_score"]    = ta["score"]
+        snap["engine_a_score"] = ta.get("engine_a_score", 0)
+        snap["engine_b_score"] = ta.get("engine_b_score", 0)
+        snap["tech_tags"]     = list(ta.get("tags", []))
 
     # ── 5. 시가총액 Hard Filter ───────────────────────────────────────────────
     valid = [s for s in snapshot.values() if s["market_cap"] >= MKTCAP_THRESHOLD]
@@ -418,10 +449,13 @@ async def get_all_sectors_cached() -> list[dict]:
 
 async def refresh_all_sectors() -> None:
     """모든 섹터를 순차 갱신하여 DB에 저장 (스케줄러 전용)."""
+    from app.services.recommendations import _fetch_market_regime
     logger.info("[sector_leader] 전체 섹터 갱신 시작")
+    market_regime = await _fetch_market_regime()
+    logger.info(f"[sector_leader] 시장 레짐: {market_regime}")
     for sector in SECTOR_STOCKS:
         try:
-            leaders = await get_sector_leaders(sector)
+            leaders = await get_sector_leaders(sector, market_regime=market_regime)
             _save_to_cache(sector, leaders)
             logger.info(f"[sector_leader] 갱신 완료: {sector}")
         except Exception as e:

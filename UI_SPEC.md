@@ -286,7 +286,7 @@
 ```
 
 - StockTable(오늘의 추천·즐겨찾기): 종목코드·시장 배지 옆에 표시
-- SectorLeaderTable(섹터 주도주): 종목코드·시장·태그 행 끝에 표시
+- SectorLeaderTable(섹터 주도주): 종목코드·시장·태그 행 끝에 표시, 점수 구성 하단에 분석 점수(tech_score / A / B / tech_tags) 배지 추가 표시
 - 포트폴리오 보유 종목: `<Link>` 바깥에 배치 (중첩 `<a>` 금지)
 
 **SectorLeaderTable 순위 아이콘**
@@ -705,23 +705,42 @@ grid grid-cols-2 md:grid-cols-4 gap-4
 | 필드 | 타입 | 기본값 |
 |------|------|--------|
 | 계좌명 | text | "가상 계좌" |
-| 전략 | select (engine_a / engine_b / both) | both |
+| 전략 | select (engine_a / engine_b / both / both_and) | both |
 | 초기 자금 | number | 10,000,000 |
+| 점수 필터 유형 | select (gte / lte / range) | gte |
 | 최소 점수 | number | 50 |
+| 최대 점수 | number \| null | — |
 | 최대 종목 수 | number | 5 |
 | 종목당 투자 비율(%) | number | 20 |
 | 손절 기준(%) | number | 10 |
 | 익절 기준(%) | number | 20 |
+| 최대 보유 일수 | number \| null | — |
+| 대형주 제외 | boolean | false |
+| 대형주 시총 임계값(억) | number \| null | — |
+| 고유동성 제외 | boolean | false |
+| 거래대금 임계값(억) | number \| null | — |
 
 #### 체결 내역 trigger_type 표시
 
-| trigger_type | 표시 | 색상 |
-|---|---|---|
-| `algo_buy` | 알고 매수 | blue |
-| `stop_loss` | 손절 | red |
-| `take_profit` | 익절 | green |
-| `sell_signal` | 매도신호 | orange |
-| `manual` | 수동 | gray |
+| trigger_type | 표시 |
+|---|---|
+| `algo_buy` | 알고리즘 매수 |
+| `stop_loss` | 손절 |
+| `take_profit` | 익절 |
+| `sell_signal` | 매도신호 |
+| `manual` | 수동 |
+| `atr_hard_stop` | ATR 하드스탑 |
+| `atr_trailing_stop` | ATR 트레일링 |
+| `rsi_exhaustion` | RSI 모멘텀소멸 |
+| `entry_low_breach` | 진입저점이탈 |
+| `time_limit_stop` | 보유기간초과 |
+| `ma20_half_exit` | MA20 분할익절 |
+| `target_reached` | 목표도달 |
+| `max_hold_exit` | 최대보유일 청산 |
+
+#### 날짜·시간 표시
+
+체결 내역 날짜 셀: `created_at`(UTC) → KST 변환 후 `YYYY-MM-DD`(상단) + `HH:MM`(하단 회색) 2행 표시.
 
 #### 상태 관리
 
@@ -943,7 +962,7 @@ headers: { Authorization: `Bearer ${token}` }
 | `HistoryEntry` | 기간별 추천 히스토리 (period_key, stocks 배열) |
 | `PortfolioAnalysis` | AI 분석 텍스트 + updated_at |
 | `StrategyAnalysisData` | 퀀트/배당 분석 결과 (팩터 점수 또는 배당 지표) |
-| `SectorLeaderStock` | 섹터 주도주 (순위, 점수, 점수 구성, MA 정보) |
+| `SectorLeaderStock` | 섹터 주도주 (순위, 섹터 점수, 점수 구성, MA 정보, tech_score/engine_a_score/engine_b_score/tech_tags) |
 | `StockMaster` | 전체 종목 마스터 (코드, 이름, 시장) |
 | `MarketIndexItem` | 지수 카드 1개 (label, price, change, change_rate, sign) |
 | `MarketIndices` | 8개 지수 키-값 맵 (kospi/kosdaq/nasdaq/dow/sp500/usd_krw/crude_oil/us10y) |

@@ -33,6 +33,9 @@ MPM은 한국투자증권(KIS) Open API로 주식 데이터를 수집하고, Goo
 ```
 mpm/
 ├── dev.sh                          # 개발 환경 통합 실행 스크립트
+├── check.sh                        # FE/BE 상태 확인 및 재시작·종료 스크립트
+├── extract_all_trades.py           # 가상거래 전체 체결내역 CSV 추출 스크립트
+├── extract_loss_trades.py          # 가상거래 손실 체결내역 CSV 추출 (알고리즘 개선용)
 ├── backend/
 │   ├── requirements.txt            # Python 의존성
 │   ├── .env.example                # 환경 변수 템플릿
@@ -59,6 +62,7 @@ mpm/
 │           ├── ohlcv_sync.py       # KIS → stock_ohlcv 테이블 동기화
 │           ├── history.py          # 추천 히스토리 스냅샷 저장
 │           ├── scheduler.py        # APScheduler 평일 자동 실행 (08:50/11:00/14:00/16:10 KST)
+│           ├── telegram.py         # 텔레그램 봇 메시지 전송 (추천 리포트, 로컬 전용)
 │           ├── portfolio_analysis.py # Gemini AI 포트폴리오 분석 서비스
 │           ├── sell_signal.py      # 매도 신호 분석 (기술적·기본적·자산관리)
 │           ├── stock_master_sync.py  # KRX 전체 상장 종목 동기화
@@ -190,8 +194,11 @@ cp backend/.env.example backend/.env
 | `DATABASE_URL` | PostgreSQL 직접 연결 URL (참고용, 마이그레이션은 Dashboard에서 수동 실행) | Supabase > Project Settings > Database > Connection string |
 | `ALLOWED_ORIGINS` | CORS 허용 출처 (쉼표 구분) | 기본값: `http://localhost:3000` |
 | `ALLOWED_USER_EMAIL` | 허용할 사용자 이메일 (단일 사용자 화이트리스트) | 설정 시 해당 계정만 API 접근 허용 |
-| `ENABLE_SCHEDULER` | 일일 동기화 스케줄러 (Render 전용) | 기본값: `false` — Render에서 `true`, 로컬에서 `false` |
+| `ENABLE_SCHEDULER` | 일일 동기화 스케줄러 | 기본값: `false` — Render 및 로컬 모두 `true` 설정 가능 |
 | `ENABLE_INTRADAY` | 장중 10분 매매 트리거 활성화 (로컬 전용) | 기본값: `false`, 로컬에서 `true` 설정 |
+| `ENABLE_TELEGRAM` | 텔레그램 추천 리포트 전송 (로컬 전용) | 기본값: `false` — 로컬에서만 `true`, Render 미설정 |
+| `TELEGRAM_BOT_TOKEN` | 텔레그램 봇 API 토큰 | `@BotFather`에서 발급 |
+| `TELEGRAM_CHAT_ID` | 메시지 수신 chat_id | 봇에 메시지 전송 후 `getUpdates`로 확인 |
 
 프론트엔드 환경 변수 (`frontend/.env.local`):
 
@@ -612,6 +619,40 @@ stock_recommendations 테이블 저장 (오늘 날짜 기존 데이터 삭제 �
 - **로그**: `uvicorn` 실행 시 터미널에 INFO 레벨 로그 출력. 스케줄러 실행·동기화 완료도 확인 가능.
 - **수동 동기화**: 스케줄 대기 없이 즉시 데이터를 채우려면 `POST /api/v1/stocks/sync/recommendations` 호출.
 - **즐겨찾기**: Supabase `favorites` 테이블에 저장 — 로컬/배포 환경 모두 동일한 목록 공유.
+
+### check.sh — 서비스 관리 스크립트
+
+```bash
+./check.sh                  # FE + BE 상태 확인
+./check.sh --be             # 백엔드만 확인
+./check.sh --fe             # 프론트엔드만 확인
+./check.sh --reboot         # FE + BE 재시작 후 확인
+./check.sh --reboot --be    # 백엔드만 재시작 (caffeinate -si 슬립 방지 포함)
+./check.sh --reboot --fe    # 프론트엔드만 재시작 (PORT=3000 고정)
+./check.sh --close          # FE + BE 전체 종료
+./check.sh --close --be     # 백엔드만 종료
+./check.sh --close --fe     # 프론트엔드만 종료
+```
+
+> **참고**: `--reboot --be` 는 `caffeinate -si` 로 uvicorn을 감싸 Mac 유휴·시스템 슬립을 방지합니다. 덮개를 닫지 않는 환경에서 스케줄러(08:50/11:00/14:00/16:10 KST)가 안정적으로 실행됩니다.
+
+---
+
+### 가상거래 데이터 추출 스크립트
+
+`backend/.env`의 `SUPABASE_SERVICE_KEY`를 사용해 직접 DB 조회 후 CSV 출력.
+
+```bash
+# 전체 체결내역 추출 (virtual_all_trades_YYYYMMDD_HHMMSS.csv)
+python3 extract_all_trades.py
+
+# 손실 체결내역만 추출 (virtual_loss_trades_YYYYMMDD_HHMMSS.csv)
+python3 extract_loss_trades.py
+```
+
+출력 항목:
+- `extract_all_trades.py`: 계좌명, 거래일, 구분(매수/매도), 종목, 체결가, 수량, 금액, 손익, 거래유형, 엔진, 점수, 보유일수 + 통계(승률·매도유형별 집계)
+- `extract_loss_trades.py`: 손실 매도 건만 필터링 → 알고리즘 개선을 위한 분석 데이터
 
 ---
 

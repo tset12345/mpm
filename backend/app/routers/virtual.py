@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -12,6 +13,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/virtual", tags=["virtual"], dependencies=[Depends(verify_token)])
 
 
+async def _fetch_realtime_prices(codes: list[str]) -> dict[str, int]:
+    """보유 포지션 종목의 KIS 실시간가를 병렬 조회한다. 실패 종목은 결과에서 제외."""
+    from app.services.kis_api import kis_client
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch(code: str) -> tuple[str, int | None]:
+        async with sem:
+            try:
+                data = await kis_client.get_stock_price(code)
+                raw = data.get("output", {}).get("stck_prpr", "0")
+                price = int(float(str(raw).replace(",", "") or "0"))
+                return code, price if price > 0 else None
+            except Exception as e:
+                logger.warning(f"포지션 실시간가 조회 실패 {code}: {e}")
+                return code, None
+
+    results = await asyncio.gather(*[_fetch(c) for c in codes])
+    return {c: p for c, p in results if p}
+
+
 # ── 요청 스키마 ───────────────────────────────────────────────────────────────
 
 class AccountCreate(BaseModel):
@@ -19,22 +40,36 @@ class AccountCreate(BaseModel):
     initial_cash: int = 10_000_000
     strategy: str = "both"
     min_score: int = 50
+    max_score: Optional[int] = None
+    score_filter_type: str = "gte"   # "gte" | "lte" | "range"
     max_positions: int = 5
     position_size: int = 20
     stop_loss_pct: int = 10
     take_profit_pct: int = 20
     profile_id: Optional[int] = None
+    filter_excl_large_cap: bool = False
+    filter_large_cap_threshold: Optional[int] = 50000
+    filter_excl_high_amount: bool = False
+    filter_high_amount_threshold: Optional[int] = 5000
+    max_hold_days: Optional[int] = None
 
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
     strategy: Optional[str] = None
     min_score: Optional[int] = None
+    max_score: Optional[int] = None
+    score_filter_type: Optional[str] = None
     max_positions: Optional[int] = None
     position_size: Optional[int] = None
     stop_loss_pct: Optional[int] = None
     take_profit_pct: Optional[int] = None
     is_active: Optional[bool] = None
+    filter_excl_large_cap: Optional[bool] = None
+    filter_large_cap_threshold: Optional[int] = None
+    filter_excl_high_amount: Optional[bool] = None
+    filter_high_amount_threshold: Optional[int] = None
+    max_hold_days: Optional[int] = None
 
 
 class ManualTradeRequest(BaseModel):
@@ -86,9 +121,18 @@ def delete_account(account_id: int):
 # ── 포지션 · 체결 내역 ─────────────────────────────────────────────────────────
 
 @router.get("/accounts/{account_id}/positions")
-def get_positions(account_id: int):
+async def get_positions(account_id: int):
     try:
-        return {"status": "success", "data": vt.get_positions(account_id)}
+        positions_raw = vt.get_positions(account_id, realtime_prices=None)
+        if not positions_raw:
+            return {"status": "success", "data": positions_raw}
+
+        codes = list({p["stock_code"] for p in positions_raw})
+        realtime_prices = await _fetch_realtime_prices(codes)
+
+        data = (vt.get_positions(account_id, realtime_prices=realtime_prices)
+                if realtime_prices else positions_raw)
+        return {"status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -104,9 +148,16 @@ def get_trades(account_id: int, limit: int = Query(100, le=500)):
 # ── 성과 지표 ─────────────────────────────────────────────────────────────────
 
 @router.get("/accounts/{account_id}/performance")
-def get_performance(account_id: int):
+async def get_performance(account_id: int):
     try:
-        data = vt.get_performance(account_id)
+        positions_raw = vt.get_positions(account_id, realtime_prices=None)
+        realtime_prices: dict[str, int] = {}
+        if positions_raw:
+            codes = list({p["stock_code"] for p in positions_raw})
+            realtime_prices = await _fetch_realtime_prices(codes)
+
+        data = vt.get_performance(account_id,
+                                   realtime_prices=realtime_prices or None)
         if not data:
             raise HTTPException(status_code=404, detail="계좌를 찾을 수 없습니다.")
         return {"status": "success", "data": data}

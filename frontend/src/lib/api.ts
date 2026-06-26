@@ -139,8 +139,12 @@ export const api = {
 
   createVirtualAccount: (body: {
     name?: string; initial_cash?: number; strategy?: string;
-    min_score?: number; max_positions?: number; position_size?: number;
+    min_score?: number; max_score?: number | null; score_filter_type?: string;
+    max_positions?: number; position_size?: number;
     stop_loss_pct?: number; take_profit_pct?: number; profile_id?: number | null;
+    filter_excl_large_cap?: boolean; filter_large_cap_threshold?: number | null;
+    filter_excl_high_amount?: boolean; filter_high_amount_threshold?: number | null;
+    max_hold_days?: number | null;
   }) =>
     fetchAPI<{ status: string; data: import("./types").VirtualAccount }>("/api/v1/virtual/accounts", {
       method: "POST",

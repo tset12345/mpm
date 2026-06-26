@@ -183,10 +183,11 @@ Authorization: Bearer <supabase_access_token>
 1. 섹터 내 종목 코드 조회 (하드코딩 매핑)
 2. KIS API `get_stock_price()` 호출 — 글로벌 세마포어(5) 적용으로 동시 호출 상한 제어
 3. `stock_master` DB에서 종목명 일괄 조회
-4. `stock_ohlcv` DB에서 최근 90일 종가 → MA5 / MA20 / MA60 계산
+4. `stock_ohlcv` DB에서 최근 130일 OHLCV(고가·저가·종가·거래량) → MA5 / MA20 / MA60 계산
 5. 시가총액 500억 미만 Hard Filter 제외
-6. 100점 스코어링: 거래대금(30) + 상승률(30) + 정배열(20) + 시총 통과(20)
-7. 상위 3개를 `sector_leaders` 테이블에 upsert 후 반환
+6. 섹터 스코어링(100점): 거래대금(30) + 상승률(30) + 정배열(20) + 시총 통과(20)
+7. 기술 분석 점수: 일목균형표 + `technical.analyze()` → `tech_score / engine_a_score / engine_b_score / tech_tags`
+8. 상위 3개를 `sector_leaders` 테이블에 upsert 후 반환
 
 **응답 예시**
 
@@ -211,7 +212,11 @@ Authorization: Bearer <supabase_access_token>
       "ma5": 195000,
       "ma20": 188000,
       "ma60": 175000,
-      "ma_aligned": true
+      "ma_aligned": true,
+      "tech_score": 72,
+      "engine_a_score": 72,
+      "engine_b_score": 0,
+      "tech_tags": ["골든크로스", "강한 상승추세"]
     }
   ]
 }
@@ -230,8 +235,12 @@ Authorization: Bearer <supabase_access_token>
 | `data[].score` | integer | 종합 점수 (0–100) |
 | `data[].score_detail` | object | 항목별 점수 (amount / rate / ma_aligned / mktcap) |
 | `data[].tags` | string[] | 강점 태그 (거래대금 / 상승률 / 정배열) |
-| `data[].ma5` / `ma20` / `ma60` | number \| null | 이동평균 (DB OHLCV 90일 기준) |
+| `data[].ma5` / `ma20` / `ma60` | number \| null | 이동평균 (DB OHLCV 130일 기준) |
 | `data[].ma_aligned` | boolean | 정배열 여부 (5MA > 20MA > 60MA) |
+| `data[].tech_score` | integer | 기술 분석 점수 (0–100, 오늘의 추천 알고리즘 동일) |
+| `data[].engine_a_score` | integer | Engine A 추세 돌파형 점수 |
+| `data[].engine_b_score` | integer | Engine B 역추세 반등형 점수 |
+| `data[].tech_tags` | string[] | 기술 분석 태그 |
 
 | 상태코드 | 의미 |
 |----------|------|
@@ -1127,10 +1136,17 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
   "initial_cash": 10000000,
   "strategy": "both",
   "min_score": 50,
+  "max_score": null,
+  "score_filter_type": "gte",
   "max_positions": 5,
   "position_size": 20,
   "stop_loss_pct": 10,
-  "take_profit_pct": 20
+  "take_profit_pct": 20,
+  "max_hold_days": null,
+  "filter_excl_large_cap": false,
+  "filter_large_cap_threshold": null,
+  "filter_excl_high_amount": false,
+  "filter_high_amount_threshold": null
 }
 ```
 
@@ -1139,12 +1155,19 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 | `name` | string | 예 | — | 계좌명 |
 | `profile_id` | integer | 아니오 | — | 연결 프로필 |
 | `initial_cash` | integer | 아니오 | 10000000 | 초기 자금 (원) |
-| `strategy` | string | 아니오 | `"both"` | `engine_a` / `engine_b` / `both` |
+| `strategy` | string | 아니오 | `"both"` | `engine_a` / `engine_b` / `both` (A 또는 B) / `both_and` (A 및 B 동시 충족) |
 | `min_score` | integer | 아니오 | 50 | 매수 최소 기술 점수 |
+| `max_score` | integer \| null | 아니오 | null | 매수 최대 점수 (`lte`/`range` 전략 시 상한) |
+| `score_filter_type` | string | 아니오 | `"gte"` | 점수 필터 유형: `gte` (min 이상) / `lte` (max 이하) / `range` (min~max) |
 | `max_positions` | integer | 아니오 | 5 | 최대 보유 종목 수 |
 | `position_size` | integer | 아니오 | 20 | 종목당 투자 비율 (%) |
 | `stop_loss_pct` | integer | 아니오 | 10 | 손절 기준 (%) |
 | `take_profit_pct` | integer | 아니오 | 20 | 익절 기준 (%) |
+| `max_hold_days` | integer \| null | 아니오 | null | 최대 보유 일수 (초과 시 `max_hold_exit` 강제 청산) |
+| `filter_excl_large_cap` | boolean | 아니오 | false | 대형주 제외 여부 (Engine B 리스크 관리) |
+| `filter_large_cap_threshold` | integer \| null | 아니오 | null | 대형주 시가총액 임계값 (억원, `filter_excl_large_cap=true` 시 유효) |
+| `filter_excl_high_amount` | boolean | 아니오 | false | 고유동성 종목 제외 여부 |
+| `filter_high_amount_threshold` | integer \| null | 아니오 | null | 거래대금 임계값 (억원, `filter_excl_high_amount=true` 시 유효) |
 
 | 상태코드 | 의미 |
 |----------|------|
@@ -1242,7 +1265,7 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 
 | 필드 | 설명 |
 |------|------|
-| `trigger_type` | 매수: `algo_buy` / `manual` · 매도(공통): `stop_loss` / `take_profit` · 매도(A): `atr_hard_stop` / `atr_trailing_stop` / `rsi_exhaustion` · 매도(B): `entry_low_breach` / `time_limit_stop` / `ma20_half_exit` / `target_reached` |
+| `trigger_type` | 매수: `algo_buy` / `manual` · 매도(공통): `stop_loss` / `take_profit` / `max_hold_exit` · 매도(A): `atr_hard_stop` / `atr_trailing_stop` / `rsi_exhaustion` · 매도(B): `entry_low_breach` / `time_limit_stop` / `ma20_half_exit` / `target_reached` |
 | `pnl` | 실현손익 (매도 시). 매수 시 `null` |
 | `pnl_rate` | 수익률 (%). 매도 시만 |
 
@@ -1260,18 +1283,34 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
   "data": {
     "initial_cash": 10000000,
     "current_cash": 8420000,
-    "total_eval": 10200000,
-    "total_assets": 18620000,
-    "total_pnl": 8620000,
-    "total_return_pct": 86.2,
+    "position_value": 1780000,
+    "total_value": 10200000,
+    "total_return_rate": 2.0,
     "realized_pnl": 450000,
     "unrealized_pnl": 168000,
     "win_rate": 66.7,
-    "total_trades": 6,
-    "position_count": 3
+    "trade_count": 6,
+    "sell_count": 3,
+    "avg_hold_days": 4.5,
+    "max_drawdown": -8.2
   }
 }
 ```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `initial_cash` | integer | 초기 자금 (원) |
+| `current_cash` | integer | 잔여 현금 (원) |
+| `position_value` | integer | 보유 포지션 평가금액 합계 |
+| `total_value` | integer | 총 평가금액 (현금 + 포지션) |
+| `total_return_rate` | number | 초기 자금 대비 수익률 (%) |
+| `realized_pnl` | integer | 실현 손익 합계 (원) |
+| `unrealized_pnl` | integer | 미실현 손익 합계 (원) |
+| `win_rate` | number \| null | 승률 (매도 건 중 PnL>0 비율, %) |
+| `trade_count` | integer | 총 거래 건수 (매수+매도) |
+| `sell_count` | integer | 매도 체결 건수 |
+| `avg_hold_days` | number \| null | 평균 보유 일수 |
+| `max_drawdown` | number \| null | 최대 손실률 (%, 매도 체결 기준 근사값) |
 
 ---
 
@@ -1398,11 +1437,14 @@ FastAPI 시작 시 싱글턴 `kis_client` 인스턴스 생성. 첫 API 호출 �
 - 엔진: APScheduler `AsyncIOScheduler` (Asia/Seoul 타임존)
 - 시작 체크: 서버 기동 시 당일 추천 종목 없으면 즉시 업데이트
 - 실행 일정 (평일):
-  - **08:50 KST**: 전일 마감 데이터 기반 추천 종목 갱신
+  - **08:50 KST**: 전일 마감 데이터 기반 추천 종목 갱신 + 가상 거래 트리거 + 텔레그램 리포트
   - **09:05 KST**: 섹터 주도주 전체 20개 갱신
-  - **11:00 KST**: 오전 장중 추천 종목 갱신 + 가상 거래 트리거 (매도 → 매수)
-  - **14:00 KST**: 오후 장중 추천 종목 갱신 + 가상 거래 트리거 (매도 → 매수)
-  - **16:10 KST**: 당일 장마감 후 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장 + 가상 거래 트리거
+  - **11:00 KST**: 오전 장중 추천 종목 갱신 + 가상 거래 트리거 + 텔레그램 리포트
+  - **14:00 KST**: 오후 장중 추천 종목 갱신 + 가상 거래 트리거 + 텔레그램 리포트
+  - **16:10 KST**: 당일 장마감 후 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장 + 가상 거래 트리거 + 텔레그램 리포트
+- **가상 거래 트리거 가격 소스**: `_fetch_realtime_prices()` — 포지션 보유 종목 전체를 KIS `get_stock_price()`로 병렬 조회(세마포어 5) → 실시간가 `price_map`을 매도·매수 트리거에 전달 (조건 검색 스냅샷 가격 미사용)
+- 각 동기화 완료 후 `ENABLE_TELEGRAM=true` 시 텔레그램 추천 리포트 전송 (로컬 전용)
+- 가상 체결 시 `ENABLE_TELEGRAM=true` 시 매수·매도 알림 즉시 전송
 
 ---
 

@@ -178,6 +178,35 @@ async def get_recommendations():
 
         rows.sort(key=lambda r: r.get("total_score") or 0, reverse=True)
 
+        # 현재가·등락률 KIS 실시간 조회 — DB 스냅샷 덮어쓰기
+        try:
+            codes = [r["stock_code"] for r in rows]
+            sem = asyncio.Semaphore(5)
+
+            async def _fetch_price(code: str) -> tuple[str, int | None, float | None]:
+                async with sem:
+                    try:
+                        out = (await kis_client.get_stock_price(code)).get("output", {})
+                        cp = out.get("stck_prpr")
+                        cr = out.get("prdy_ctrt")
+                        return (code,
+                                int(cp) if cp else None,
+                                float(cr) if cr is not None else None)
+                    except Exception:
+                        return code, None, None
+
+            price_results = await asyncio.gather(*[_fetch_price(c) for c in codes])
+            for code, cp, cr in price_results:
+                if cp is not None:
+                    for row in rows:
+                        if row["stock_code"] == code:
+                            row["current_price"] = cp
+                            if cr is not None:
+                                row["change_rate"] = cr
+                            break
+        except Exception as e:
+            logger.warning(f"추천 종목 실시간가 조회 실패(DB값 유지): {e}")
+
         return {"status": "success", "data": rows, "date": latest_date, "generated_at": generated_at}
     except Exception as e:
         logger.warning(f"추천 종목 조회 실패: {e}")

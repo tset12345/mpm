@@ -45,19 +45,7 @@ MEANINGFUL_SCORE_THRESHOLD = 20   # 기술 점수 최소 임계값
 MIN_PRICE = 1_000                  # 동전주 필터링 기준 (원)
 TOP_N = 10                         # 최종 추천 종목 수
 
-_ETF_NAME_KEYWORDS = {
-    "KODEX", "TIGER", "KINDEX", "KOSEF", "HANARO", "RISE", "ACE", "SOL",
-    "TIMEFOLIO", "ARIRANG", "TREX", "PLUS", "레버리지", "인버스", "2X", "TOP10",
-}
-
-
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
-
-def _is_etf_or_etn(code: str, name: str = "") -> bool:
-    if len(code) != 6 or not code.isdigit():
-        return True
-    return any(kw.upper() in name.upper() for kw in _ETF_NAME_KEYWORDS)
-
 
 def _to_float(val, default: float = 0.0) -> float:
     try:
@@ -190,7 +178,7 @@ async def update_recommendations() -> list[dict]:
             source_map[code].add(src_label)   # 중복이어도 source는 기록
             if code in rank_map:
                 continue
-            if not _is_etf_or_etn(code, name) and price >= MIN_PRICE:
+            if price >= MIN_PRICE:
                 rank_map[code] = item
                 added += 1
             if added >= 30:
@@ -281,6 +269,11 @@ async def update_recommendations() -> list[dict]:
         if w52_hgpr > 0 and current_price >= w52_hgpr * 0.95:
             tags.append("52주 신고가 근접")
 
+        lstn_stcn    = _to_int(item.get("lstn_stcn"))           # 상장주수
+        acml_tr_pbmn = _to_int(item.get("acml_tr_pbmn"))         # 누적 거래대금 (원)
+        market_cap_e8   = lstn_stcn * current_price // 100_000_000 if lstn_stcn and current_price else None
+        daily_amount_e8 = acml_tr_pbmn // 100_000_000 if acml_tr_pbmn else None
+
         rows.append({
             "date":              today_str,
             "stock_code":        code,
@@ -294,6 +287,8 @@ async def update_recommendations() -> list[dict]:
             "engine_a_score":    ta.get("engine_a_score", 0),
             "engine_b_score":    ta.get("engine_b_score", 0),
             "source_conditions": sorted(source_map.get(code, set())),
+            "market_cap_e8":     market_cap_e8,
+            "daily_amount_e8":   daily_amount_e8,
         })
 
     _upsert_rows(rows)
