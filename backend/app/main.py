@@ -33,7 +33,10 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.allowed_origins.split(",") if o.strip()],
+    allow_origins=list({o.strip() for o in settings.allowed_origins.split(",") if o.strip()} | {
+        "http://localhost:3000",
+        "https://mpm-fe.vercel.app",
+    }),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
