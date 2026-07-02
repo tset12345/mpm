@@ -420,7 +420,10 @@ async def get_sector_leaders_cached(sector: str, force: bool = False) -> tuple[l
             logger.warning(f"[sector_leader] 캐시 조회 실패 {sector}: {e}")
 
     leaders = await get_sector_leaders(sector)
-    updated_at = _save_to_cache(sector, leaders)
+    if leaders:
+        updated_at = _save_to_cache(sector, leaders)
+    else:
+        updated_at = None
     return leaders, updated_at
 
 
@@ -456,8 +459,11 @@ async def refresh_all_sectors() -> None:
     for sector in SECTOR_STOCKS:
         try:
             leaders = await get_sector_leaders(sector, market_regime=market_regime)
-            _save_to_cache(sector, leaders)
-            logger.info(f"[sector_leader] 갱신 완료: {sector}")
+            if leaders:
+                _save_to_cache(sector, leaders)
+                logger.info(f"[sector_leader] 갱신 완료: {sector} ({len(leaders)}개)")
+            else:
+                logger.warning(f"[sector_leader] 빈 결과 — 캐시 유지: {sector}")
         except Exception as e:
             logger.error(f"[sector_leader] 갱신 실패 {sector}: {e}")
     logger.info("[sector_leader] 전체 섹터 갱신 완료")
