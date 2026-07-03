@@ -100,7 +100,7 @@ mpm/
 
 | 변수 | 현재 로컬 값 | Render |
 |------|-------------|--------|
-| `ENABLE_SCHEDULER` | `true` | `true` |
+| `ENABLE_SCHEDULER` | `false` | `true` |
 | `ENABLE_INTRADAY` | `true` | `false` |
 | `ENABLE_TELEGRAM` | `true` | `false` |
 | `KIS_IS_MOCK` | `false` | `false` |
@@ -111,23 +111,15 @@ mpm/
 
 ## 스케줄러 운영 구조
 
-### 현재 운영 방식 (Render 파이프라인 소진 기간)
-
-2026-06 중 Render 월별 빌드 파이프라인 분 소진 → 2026-07까지 Render 배포 불가.  
-현재는 **로컬 서버에서** 스케줄러와 장중 트리거를 모두 실행.
+### 현재 운영 방식 (2026-07 ~)
 
 ```
-로컬 Mac (caffeinate -si로 슬립 방지)
-├── ENABLE_SCHEDULER=true  → 08:50/11:00/14:00/16:10 일일 동기화
-└── ENABLE_INTRADAY=true   → 09:00~15:20 매 10분 장중 실시간 트리거
+Render BE (ENABLE_SCHEDULER=true)  → 08:50/11:00/14:00/16:10 일일 동기화 + 추천 알고리즘
+로컬 Mac  (ENABLE_INTRADAY=true)   → 09:00~15:20 매 10분 장중 실시간 트리거 + 텔레그램 알림
 ```
 
-### Render 복구 후 원래 구조
-
-```
-Render BE: ENABLE_SCHEDULER=true  → 일일 동기화
-로컬 Mac:  ENABLE_INTRADAY=true   → 장중 실시간 트리거
-```
+- 로컬 Mac: caffeinate -si 슬립 방지 필수 (`check.sh --reboot --be`)
+- `ENABLE_TELEGRAM=true`는 로컬에만 — Render는 텔레그램 미사용
 
 ### 가상 거래 트리거 가격 소스
 

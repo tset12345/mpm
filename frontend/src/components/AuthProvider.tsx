@@ -25,6 +25,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (session === undefined) return;
     if (!session && pathname !== "/login") router.replace("/login");
+    if (session && pathname === "/login") router.replace("/stocks");
   }, [session, pathname, router]);
 
   if (session === undefined) return null;
