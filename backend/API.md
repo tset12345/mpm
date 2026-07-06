@@ -1178,7 +1178,57 @@ KRX(`kind.krx.co.kr`)에서 KOSPI·KOSDAQ 전체 종목 목록을 다운로드�
 
 ### PATCH /api/v1/virtual/accounts/{account_id}
 
-가상 계좌 설정을 수정합니다. 제공된 필드만 업데이트합니다.
+가상 계좌 설정을 수정합니다. 제공된 필드만 업데이트합니다 (초기자금 `initial_cash` 변경 불가).
+
+**Path Parameters**
+
+| 파라미터 | 타입 | 설명 |
+|----------|------|------|
+| `account_id` | integer | 계좌 ID |
+
+**Request Body** (application/json, 모든 필드 선택)
+
+```json
+{
+  "name": "수정된 계좌명",
+  "strategy": "engine_a",
+  "score_filter_type": "range",
+  "min_score": 50,
+  "max_score": 80,
+  "max_positions": 5,
+  "position_size": 20,
+  "stop_loss_pct": 10,
+  "take_profit_pct": 20,
+  "max_hold_days": null,
+  "filter_excl_large_cap": false,
+  "filter_large_cap_threshold": null,
+  "filter_excl_high_amount": false,
+  "filter_high_amount_threshold": null
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `name` | string | 계좌명 |
+| `strategy` | string | `engine_a` / `engine_b` / `both` / `both_and` |
+| `score_filter_type` | string | `gte` / `lte` / `range` |
+| `min_score` | integer | 매수 최소 기술 점수 |
+| `max_score` | integer \| null | 매수 최대 점수 (`lte`/`range` 시 유효) |
+| `max_positions` | integer | 최대 보유 종목 수 |
+| `position_size` | integer | 종목당 투자 비율 (%) |
+| `stop_loss_pct` | integer | 손절 기준 (%) |
+| `take_profit_pct` | integer | 익절 기준 (%) |
+| `max_hold_days` | integer \| null | 최대 보유 일수 (null = 제한 없음) |
+| `filter_excl_large_cap` | boolean | 대형주 제외 여부 |
+| `filter_large_cap_threshold` | integer \| null | 대형주 시총 임계값 (억원) |
+| `filter_excl_high_amount` | boolean | 고유동성 종목 제외 여부 |
+| `filter_high_amount_threshold` | integer \| null | 거래대금 임계값 (억원) |
+
+**응답 예시**
+
+```json
+{ "status": "success", "data": { "id": 1, "name": "수정된 계좌명", ... } }
+```
 
 | 상태코드 | 의미 |
 |----------|------|

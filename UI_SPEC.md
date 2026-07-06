@@ -195,9 +195,11 @@
 #### 동작
 
 - `handleLogin()`: Supabase `signInWithPassword()` 호출
-- 성공 시 `/stocks`로 `router.replace()`
-- 실패 시 `error` 표시
+- 성공 시: `setLoading(false)` 호출하지 않음 → "로그인 중..." 상태 유지 → AuthProvider가 `onAuthStateChange`로 세션 감지 후 `/stocks`로 redirect
+- 실패 시: `setLoading(false)` + `error` 표시
 - `loading` 중 버튼 비활성화 + 텍스트 "로그인 중..."
+
+> **설계 이유**: `signInWithPassword` 완료 ~ Supabase 세션 전파 ~ AuthProvider redirect 사이의 공백 구간에 로딩 상태를 유지해 시각적 일관성 보장.
 
 ---
 
@@ -700,7 +702,9 @@ grid grid-cols-2 md:grid-cols-4 gap-4
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 계좌 설정 폼 (인라인 토글)
+#### 계좌 생성 폼 (CreateAccountModal)
+
+"+ 새 계좌" 버튼 클릭 시 모달 오픈.
 
 | 필드 | 타입 | 기본값 |
 |------|------|--------|
@@ -719,6 +723,28 @@ grid grid-cols-2 md:grid-cols-4 gap-4
 | 대형주 시총 임계값(억) | number \| null | — |
 | 고유동성 제외 | boolean | false |
 | 거래대금 임계값(억) | number \| null | — |
+
+#### 계좌 편집 폼 (EditAccountModal)
+
+계좌 카드 우측 ✎ 버튼 클릭 시 모달 오픈. `PATCH /api/v1/virtual/accounts/{id}` 호출.  
+초기자금(`initial_cash`) 제외, 나머지 모든 설정 변경 가능. 현재 계좌 값으로 폼 초기화.
+
+| 필드 | 타입 | 초기값 |
+|------|------|--------|
+| 계좌명 | text | `account.name` |
+| 전략 | select (engine_a / engine_b / both / both_and) | `account.strategy` |
+| 점수 필터 유형 | select (gte / lte / range) | `account.score_filter_type` |
+| 최소 점수 | number | `account.min_score` |
+| 최대 점수 | number \| null | `account.max_score ?? 80` |
+| 최대 종목 수 | number | `account.max_positions` |
+| 종목당 투자 비율(%) | number | `account.position_size` |
+| 손절 기준(%) | number | `account.stop_loss_pct` |
+| 익절 기준(%) | number | `account.take_profit_pct` |
+| 최대 보유 일수 | number \| "" | `account.max_hold_days ?? ""` |
+| 대형주 제외 | boolean | `account.filter_excl_large_cap` |
+| 대형주 시총 임계값(억) | number \| null | `account.filter_large_cap_threshold ?? 50000` |
+| 고유동성 제외 | boolean | `account.filter_excl_high_amount` |
+| 거래대금 임계값(억) | number \| null | `account.filter_high_amount_threshold ?? 5000` |
 
 #### 체결 내역 trigger_type 표시
 
@@ -880,7 +906,10 @@ grid grid-cols-2 md:grid-cols-4 gap-4
 **파일**: `frontend/src/components/AuthProvider.tsx`
 
 - Supabase `onAuthStateChange` 구독으로 세션 감지
-- 세션 없으면 `/login`으로 redirect (단, `/login` 페이지 자체는 예외)
+- **양방향 가드**:
+  - 세션 없고 `/login` 아닌 경로 → `/login`으로 redirect
+  - 세션 있고 `/login` 경로 → `/stocks`으로 redirect
+- `session === undefined` 동안 `null` 렌더링 (초기 세션 로드 대기)
 - `AuthContext`로 세션 정보를 하위 컴포넌트에 제공
 - `useSession()` hook으로 세션 접근
 
