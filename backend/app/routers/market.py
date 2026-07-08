@@ -43,6 +43,54 @@ def _sf(val, default: float = 0.0) -> float:
         return default
 
 
+def _load_treemap_from_db(code_sector: dict[str, str]) -> list[dict]:
+    """KIS inquire-price 전면 실패 시 stock_ohlcv DB 최근 2일로 fallback."""
+    try:
+        codes = list(code_sector.keys())
+        start_iso = (date.today() - timedelta(days=10)).isoformat()
+        rows = (
+            supabase.table("stock_ohlcv")
+            .select("stock_code,trade_date,close_price,volume")
+            .in_("stock_code", codes)
+            .gte("trade_date", start_iso)
+            .order("trade_date", desc=True)
+            .execute()
+        ).data or []
+
+        by_code: dict[str, list] = defaultdict(list)
+        for r in rows:
+            by_code[r["stock_code"]].append(r)
+
+        result = []
+        for code in codes:
+            recs = by_code.get(code, [])
+            if not recs:
+                continue
+            latest = recs[0]
+            prev = recs[1] if len(recs) > 1 else None
+            current_price = float(latest["close_price"])
+            change_rate = 0.0
+            if prev and float(prev["close_price"]) > 0:
+                change_rate = round((current_price - float(prev["close_price"])) / float(prev["close_price"]) * 100, 2)
+            result.append({
+                "stock_code": code,
+                "stock_name": code,
+                "sector": code_sector[code],
+                "current_price": current_price,
+                "change_rate": change_rate,
+                "market_cap": 0.0,
+                "frgn_ntby_qty": 0.0,
+                "org_ntby_qty": 0.0,
+                "volume": float(latest["volume"]),
+                "transaction_amount": 0.0,
+                "source": "db_fallback",
+            })
+        return result
+    except Exception as e:
+        logger.warning(f"[market/treemap] DB fallback 실패: {e}")
+        return []
+
+
 async def _fetch_stock(code: str, sector: str) -> dict | None:
     async with _KIS_SEM:
         try:
@@ -85,6 +133,11 @@ async def get_treemap(sort: str = Query("change_rate")):
         return_exceptions=True,
     )
     data = [r for r in results if isinstance(r, dict)]
+
+    # KIS inquire-price 전면 장애 시 DB fallback
+    if not data:
+        logger.warning("[market/treemap] KIS 전면 실패 → stock_ohlcv DB fallback 사용")
+        data = _load_treemap_from_db(code_sector)
 
     # 기관/외국인 순매수 보강 (ranking API)
     try:

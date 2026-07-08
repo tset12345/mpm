@@ -42,7 +42,9 @@ async def run_daily_sync():
     logger.info("일일 데이터 동기화 시작")
     try:
         stocks = await update_recommendations()
-        codes = [s["stock_code"] for s in stocks]
+        from app.services.sector_leader import SECTOR_STOCKS
+        sector_codes = [c for codes in SECTOR_STOCKS.values() for c in codes]
+        codes = list(set([s["stock_code"] for s in stocks] + sector_codes))
         await sync_ohlcv(codes)
         save_snapshot(stocks)
 
