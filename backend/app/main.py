@@ -18,6 +18,11 @@ async def lifespan(app: FastAPI):
     yield
     if settings.enable_scheduler or settings.enable_intraday:
         scheduler.shutdown()
+    from app.services.kis_api import kis_client
+    await kis_client.aclose()
+    from app.routers.market import _YAHOO_CLIENT
+    if _YAHOO_CLIENT and not _YAHOO_CLIENT.is_closed:
+        await _YAHOO_CLIENT.aclose()
 
 
 app = FastAPI(title="MPM API", version="1.0.0", lifespan=lifespan)

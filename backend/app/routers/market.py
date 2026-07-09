@@ -399,6 +399,19 @@ _INDICES_DATA: dict = {}
 _INDICES_AT: float = 0.0
 _INDICES_TTL = 60  # 1분 캐시
 
+# Yahoo Finance 공유 클라이언트 — 매 호출 시 신규 생성 방지 (SSL context 누적 방지)
+_YAHOO_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_yahoo_client() -> httpx.AsyncClient:
+    global _YAHOO_CLIENT
+    if _YAHOO_CLIENT is None or _YAHOO_CLIENT.is_closed:
+        _YAHOO_CLIENT = httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0 (compatible)"},
+            timeout=10.0,
+        )
+    return _YAHOO_CLIENT
+
 
 @router.get("/indices")
 async def get_market_indices():
@@ -430,14 +443,11 @@ async def get_market_indices():
         try:
             import urllib.parse
             encoded = urllib.parse.quote(symbol)
-            async with httpx.AsyncClient(
-                headers={"User-Agent": "Mozilla/5.0 (compatible)"},
-                timeout=10.0,
-            ) as client:
-                resp = await client.get(
-                    f"https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d"
-                )
-                meta = resp.json()["chart"]["result"][0]["meta"]
+            client = _get_yahoo_client()
+            resp = await client.get(
+                f"https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d"
+            )
+            meta = resp.json()["chart"]["result"][0]["meta"]
             price = float(meta.get("regularMarketPrice") or 0)
             prev = float(meta.get("chartPreviousClose") or meta.get("previousClose") or 0)
             change = round(price - prev, 2)
