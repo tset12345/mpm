@@ -25,13 +25,33 @@ async def sync_ohlcv(stock_codes: list[str] | None = None) -> dict:
             raise
 
     today = today_kst()
-    start_date = (today - timedelta(days=365 * 2)).strftime("%Y%m%d")
+    start_date = (today - timedelta(days=130)).strftime("%Y%m%d")
     end_date = today.strftime("%Y%m%d")
+    today_iso = today.isoformat()
+
+    # 이미 오늘 데이터가 있는 종목은 건너뜀
+    already_synced: set[str] = set()
+    if stock_codes:
+        try:
+            rows_check = (
+                supabase.table("stock_ohlcv")
+                .select("stock_code")
+                .in_("stock_code", stock_codes)
+                .eq("trade_date", today_iso)
+                .execute()
+            )
+            already_synced = {r["stock_code"] for r in (rows_check.data or [])}
+            if already_synced:
+                logger.info(f"오늘 데이터 이미 존재 — {len(already_synced)}개 스킵")
+        except Exception:
+            pass
 
     total_rows = 0
     errors = []
 
     for i, code in enumerate(stock_codes):
+        if code in already_synced:
+            continue
         if i > 0:
             await asyncio.sleep(0.5)
 
