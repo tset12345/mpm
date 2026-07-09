@@ -1,4 +1,7 @@
+import logging
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     kis_app_key: str = ""
@@ -23,3 +26,7 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+# ALLOWED_USER_EMAIL 미설정 시 경고 — 유효한 Supabase 토큰이면 누구든 접근 가능
+if not settings.allowed_user_email:
+    logger.warning("ALLOWED_USER_EMAIL 미설정 — 인증된 모든 사용자가 API에 접근 가능합니다.")

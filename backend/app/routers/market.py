@@ -257,7 +257,7 @@ async def get_investor_trend():
 # ── ADR ───────────────────────────────────────────────────────────────────────
 
 @router.get("/adr")
-def get_adr(days: int = Query(60)):
+def get_adr(days: int = Query(60, ge=1, le=365)):
     """등락비율(ADR) — stock_ohlcv DB에서 계산"""
     try:
         start_iso = (date.today() - timedelta(days=days + 10)).isoformat()

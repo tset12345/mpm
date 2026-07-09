@@ -80,6 +80,15 @@ class ManualTradeRequest(BaseModel):
     quantity: Optional[int] = None
 
 
+# ── 헬퍼 ─────────────────────────────────────────────────────────────────────
+
+def _account_or_404(account_id: int) -> dict:
+    account = vt.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="계좌를 찾을 수 없습니다.")
+    return account
+
+
 # ── 계좌 CRUD ─────────────────────────────────────────────────────────────────
 
 @router.get("/accounts")
@@ -101,27 +110,30 @@ def create_account(body: AccountCreate):
 
 @router.patch("/accounts/{account_id}")
 def update_account(account_id: int, body: AccountUpdate):
+    _account_or_404(account_id)
     try:
         updates = {k: v for k, v in body.model_dump().items() if v is not None}
         account = vt.update_account(account_id, updates)
         return {"status": "success", "data": account}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="계좌 업데이트에 실패했습니다.")
 
 
 @router.delete("/accounts/{account_id}")
 def delete_account(account_id: int):
+    _account_or_404(account_id)
     try:
         vt.delete_account(account_id)
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="계좌 삭제에 실패했습니다.")
 
 
 # ── 포지션 · 체결 내역 ─────────────────────────────────────────────────────────
 
 @router.get("/accounts/{account_id}/positions")
 async def get_positions(account_id: int):
+    _account_or_404(account_id)
     try:
         positions_raw = vt.get_positions(account_id, realtime_prices=None)
         if not positions_raw:
@@ -139,16 +151,18 @@ async def get_positions(account_id: int):
 
 @router.get("/accounts/{account_id}/trades")
 def get_trades(account_id: int, limit: int = Query(100, le=500)):
+    _account_or_404(account_id)
     try:
         return {"status": "success", "data": vt.get_trades(account_id, limit)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="거래 내역 조회에 실패했습니다.")
 
 
 # ── 성과 지표 ─────────────────────────────────────────────────────────────────
 
 @router.get("/accounts/{account_id}/performance")
 async def get_performance(account_id: int):
+    _account_or_404(account_id)
     try:
         positions_raw = vt.get_positions(account_id, realtime_prices=None)
         realtime_prices: dict[str, int] = {}
@@ -171,6 +185,7 @@ async def get_performance(account_id: int):
 
 @router.post("/accounts/{account_id}/trades")
 def manual_trade(account_id: int, body: ManualTradeRequest):
+    _account_or_404(account_id)
     if body.side not in ("buy", "sell"):
         raise HTTPException(status_code=400, detail="side는 'buy' 또는 'sell'이어야 합니다.")
     try:

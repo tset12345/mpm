@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/holdings", tags=["holdings"], dependencies=[Depends(verify_token)])
 
 
+def _holding_or_404(holding_id: int) -> dict:
+    row = supabase.table("holdings").select("*").eq("id", holding_id).limit(1).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
+    return row.data[0]
+
+
 class HoldingCreate(BaseModel):
     stock_code: str
     stock_name: str
@@ -167,6 +174,7 @@ async def create_holding(body: HoldingCreate):
 
 @router.put("/{holding_id}")
 async def update_holding(holding_id: int, body: HoldingUpdate):
+    _holding_or_404(holding_id)
     updates: dict = {}
     if body.avg_price is not None:
         updates["avg_price"] = body.avg_price
@@ -188,7 +196,7 @@ async def update_holding(holding_id: int, body: HoldingUpdate):
         )
         return {"status": "success", "data": result.data[0] if result.data else {}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="보유 종목 업데이트에 실패했습니다.")
 
 
 @router.get("/{holding_id}/sell-analysis")
@@ -197,16 +205,7 @@ async def get_sell_analysis(holding_id: int):
     from app.services.sell_signal import analyze_sell
     from datetime import date, timedelta
 
-    # 1. 보유 종목 조회
-    try:
-        row = supabase.table("holdings").select("*").eq("id", holding_id).limit(1).execute()
-        if not row.data:
-            raise HTTPException(status_code=404, detail="보유 종목을 찾을 수 없습니다.")
-        holding = row.data[0]
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    holding = _holding_or_404(holding_id)
 
     stock_code = holding["stock_code"]
     avg_price   = holding["avg_price"]
@@ -276,11 +275,12 @@ async def get_sell_analysis(holding_id: int):
 
 @router.delete("/{holding_id}")
 async def delete_holding(holding_id: int):
+    _holding_or_404(holding_id)
     try:
         supabase.table("holdings").delete().eq("id", holding_id).execute()
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="보유 종목 삭제에 실패했습니다.")
 
 
 def _empty_summary() -> dict:

@@ -38,17 +38,20 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(_security)
     token = credentials.credentials
     try:
         header = jwt.get_unverified_header(token)
-        alg = header.get("alg", "HS256")
+        kid = header.get("kid")
 
-        if alg == "ES256":
-            key = _get_public_key(header["kid"])
+        # alg를 헤더에서 읽지 않고 kid 존재 여부로 분기 (algorithm confusion 방지)
+        if kid:
+            key = _get_public_key(kid)
+            algorithms = ["ES256"]
         else:
             key = settings.supabase_jwt_secret
+            algorithms = ["HS256"]
 
         payload = jwt.decode(
             token,
             key,
-            algorithms=[alg],
+            algorithms=algorithms,
             audience="authenticated",
         )
     except jwt.ExpiredSignatureError:
