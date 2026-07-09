@@ -1,5 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import asyncio
 import logging
 
 from app.core.config import settings
@@ -8,10 +9,12 @@ from app.core.timezone import today_kst
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
+# run_daily_sync() 중복 실행 방지 플래그
+_sync_running = False
+
 
 async def _fetch_realtime_prices(codes: set[str]) -> dict[str, int]:
     """KIS 실시간가 병렬 조회 — 매매 트리거용."""
-    import asyncio
     from app.services.kis_api import kis_client
 
     sem = asyncio.Semaphore(5)
@@ -33,6 +36,11 @@ async def _fetch_realtime_prices(codes: set[str]) -> dict[str, int]:
 
 async def run_daily_sync():
     """장 마감 후 실행: 추천 종목 업데이트 + OHLCV 동기화 + 히스토리 저장 + 가상 거래 트리거"""
+    global _sync_running
+    if _sync_running:
+        logger.warning("run_daily_sync: 이미 실행 중 — 중복 호출 무시")
+        return
+    _sync_running = True
     from app.services.recommendations import update_recommendations
     from app.services.ohlcv_sync import sync_ohlcv
     from app.services.history import save_snapshot
@@ -65,6 +73,8 @@ async def run_daily_sync():
         logger.info("일일 데이터 동기화 완료")
     except Exception as e:
         logger.error(f"일일 동기화 실패: {e}")
+    finally:
+        _sync_running = False
 
 
 async def run_intraday_trading():
@@ -129,13 +139,16 @@ async def run_sector_leader_refresh():
 
 
 async def startup_sync_if_needed():
-    """서버 시작 시 오늘(KST) 추천 데이터가 없으면 즉시 동기화."""
+    """서버 시작 시 오늘(KST) 추천 데이터가 없으면 동기화.
+    10초 대기 후 실행 — 서버 완전 기동 후 실행하여 startup 메모리 스파이크 분리.
+    """
+    await asyncio.sleep(10)
     from app.services.supabase_client import supabase
     today = today_kst().isoformat()
     try:
         result = supabase.table("stock_recommendations").select("stock_code").eq("date", today).limit(1).execute()
         if not result.data:
-            logger.info(f"시작 체크: 오늘 KST({today}) 추천 데이터 없음 → 즉시 동기화 실행")
+            logger.info(f"시작 체크: 오늘 KST({today}) 추천 데이터 없음 → 동기화 실행")
             await run_daily_sync()
         else:
             logger.info(f"시작 체크: 오늘 KST({today}) 추천 데이터 확인됨 ({len(result.data)}건)")
@@ -163,14 +176,14 @@ def start_scheduler():
                 CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri", timezone="Asia/Seoul"),
                 id=job_id,
                 replace_existing=True,
-                misfire_grace_time=3600,
+                misfire_grace_time=30,
             )
         scheduler.add_job(
             run_sector_leader_refresh,
             CronTrigger(hour=9, minute=5, day_of_week="mon-fri", timezone="Asia/Seoul"),
             id="sector_leader_refresh",
             replace_existing=True,
-            misfire_grace_time=3600,
+            misfire_grace_time=30,
         )
         logger.info("일일 동기화 잡 등록 — 08:50/11:00/14:00/16:10 전체동기화 | 09:05 섹터주도주 (ENABLE_SCHEDULER=true)")
 
