@@ -1,6 +1,8 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import asyncio
+import ctypes
+import gc
 import logging
 
 from app.core.config import settings
@@ -8,6 +10,30 @@ from app.core.timezone import today_kst
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
+
+def _log_rss() -> int:
+    """현재 프로세스 VmRSS(MB) 반환 및 로깅 (Linux /proc 전용, 실패 시 0)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss_kb = int(line.split()[1])
+                    rss_mb = rss_kb // 1024
+                    logger.info(f"[메모리] VmRSS={rss_mb} MB")
+                    return rss_mb
+    except Exception:
+        pass
+    return 0
+
+
+def _trim_memory():
+    """GC 수행 후 C heap 미사용 페이지를 OS에 반환 (Linux malloc_trim)."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 # run_daily_sync() 중복 실행 방지 플래그
 _sync_running = False
@@ -47,6 +73,7 @@ async def run_daily_sync():
     from app.services.virtual_trading import virtual_buy_trigger, virtual_sell_trigger, list_accounts
     from app.services.supabase_client import supabase
     from app.services.telegram import send_recommendation_report
+    _log_rss()
     logger.info("일일 데이터 동기화 시작")
     try:
         stocks = await update_recommendations()
@@ -75,6 +102,8 @@ async def run_daily_sync():
         logger.error(f"일일 동기화 실패: {e}")
     finally:
         _sync_running = False
+        _trim_memory()
+        _log_rss()
 
 
 async def run_intraday_trading():
@@ -143,6 +172,7 @@ async def startup_sync_if_needed():
     10초 대기 후 실행 — 서버 완전 기동 후 실행하여 startup 메모리 스파이크 분리.
     """
     await asyncio.sleep(10)
+    _log_rss()
     from app.services.supabase_client import supabase
     today = today_kst().isoformat()
     try:
