@@ -1,6 +1,6 @@
 # MPM 기능 목록
 
-> 최종 업데이트: 2026-07-06 (가상거래 계좌 편집 기능 추가 / AuthProvider 양방향 가드 / 로그인 로딩 상태 보장)
+> 최종 업데이트: 2026-07-10 (Render OOM 수정 / 보안 강화 — JWT 알고리즘 고정·IDOR 방어·공급망 감사)
 
 ---
 
@@ -433,11 +433,14 @@ Render 배포 시 미전송 (환경변수 미설정으로 자동 비활성).
 
 | 항목 | 내용 |
 |---|---|
-| JWT 인증 | Supabase JWT(Bearer) 검증, ES256(JWKS) / HS256(secret) 알고리즘 지원 |
+| JWT 인증 | Supabase JWT(Bearer) 검증, ES256(JWKS) / HS256(secret) 알고리즘 **명시 고정** (알고리즘 혼용 공격 방어) |
 | JWKS TTL | 1시간마다 공개키 재조회 (키 로테이션 대응) |
+| IDOR 방어 | holdings·profiles·virtual_accounts 등 모든 리소스 수정·삭제 시 소유권 검증 (타 사용자 id로 접근 차단) |
 | 사용자 화이트리스트 | `ALLOWED_USER_EMAIL` 설정 시 해당 계정만 API 접근 허용 |
 | CORS | `ALLOWED_ORIGINS` 환경변수로 허용 도메인 제한 |
 | RLS | 전체 테이블 RLS 활성화 — anon 키 PostgREST 직접 접근 차단 |
+| Rate Limiting | SlowAPI 미들웨어 — 120 req/min 초과 시 429 응답 |
+| 공급망 감사 | `backend/security_audit.sh` — CVE 스캔(pip-audit) + 해시 무결성 + 버전 불일치 검사 |
 
 ### UX
 

@@ -124,7 +124,8 @@ mpm/
         ├── 017_sector_leaders.sql          # sector_leaders 테이블
         ├── 018_favorites.sql               # favorites 테이블
         ├── 019_virtual_trading.sql         # virtual_accounts, virtual_positions, virtual_trades
-        └── 020_enable_rls.sql              # 전체 테이블 RLS 활성화
+        ├── 020_enable_rls.sql              # 전체 테이블 RLS 활성화
+        └── 021_virtual_position_tracking.sql # virtual_positions에 entry_atr·highest_price·half_exited·entry_low 추가
 ```
 
 ---
@@ -492,8 +493,8 @@ UNIQUE 제약: `(account_id, stock_code)`.
 016_recommendations_source_conditions.sql
 017_sector_leaders.sql          → sector_leaders
 018_favorites.sql               → favorites
-019_virtual_trading.sql         → virtual_accounts, virtual_positions, virtual_trades
-020_enable_rls.sql              → 전체 테이블 RLS 활성화
+019_virtual_trading.sql           → virtual_accounts, virtual_positions, virtual_trades
+020_enable_rls.sql                → 전체 테이블 RLS 활성화
 021_virtual_position_tracking.sql → virtual_positions에 entry_atr·highest_price·half_exited·entry_low 추가
 ```
 
@@ -509,10 +510,13 @@ UNIQUE 제약: `(account_id, stock_code)`.
 
 | 계층 | 조치 |
 |------|------|
-| API 인증 | Supabase JWT(Bearer) 검증 (`app/core/auth.py`) |
+| API 인증 | Supabase JWT(Bearer) 검증 (`app/core/auth.py`), ES256/HS256 알고리즘 명시 고정 |
+| IDOR 방어 | 리소스 수정·삭제 시 소유권(user_id) 검증 — 타 사용자 id로 접근 차단 |
 | 사용자 화이트리스트 | `ALLOWED_USER_EMAIL` 설정 시 해당 계정만 허용 |
 | CORS | `ALLOWED_ORIGINS` 설정 도메인만 허용 |
 | JWKS TTL | 1시간마다 공개키 재조회 (키 로테이션 대응) |
+| Rate Limiting | SlowAPI 미들웨어 — 120 req/min 초과 시 429 |
+| 공급망 감사 | `backend/security_audit.sh` — pip-audit CVE 스캔 + 해시 무결성 + 버전 불일치 검사 |
 
 ---
 
@@ -677,3 +681,25 @@ Supabase PostgREST에서 `ilike` 연산자를 사용하면 특정 버전에서 �
 모든 테이블에 RLS가 활성화되어 있습니다(`020_enable_rls.sql`). `service_role` 키는 RLS를 자동으로 우회하므로 백엔드 동작에 영향 없습니다.
 
 별도 정책을 추가하지 않으면 anon 키로는 모든 테이블이 기본 거부(default-deny)되어 PostgREST 직접 접근이 차단됩니다. 이는 의도된 보안 설정입니다.
+
+### Render OOM (메모리 초과)
+
+Render free tier는 512 MB RSS 한도를 적용합니다. 한도 초과 시 인스턴스가 재시작됩니다.
+
+**주요 원인 및 대책**
+
+| 원인 | 수정 내용 |
+|------|----------|
+| httpx.AsyncClient per-request 생성 — KIS API 호출마다 새 SSL context 생성으로 RSS 단조 증가 | `KISApiClient._get_http()` 공유 싱글턴 도입 (`kis_api.py`) |
+| Yahoo Finance 동일 패턴 | `_get_yahoo_client()` 모듈 레벨 싱글턴 (`market.py`) |
+| 스케줄러 재시작 시 `run_daily_sync()` 중복 실행 | `_sync_running` 플래그 + `misfire_grace_time=30` (`scheduler.py`) |
+| 메모리 반환 없음 | sync 완료 후 `gc.collect()` + `malloc_trim(0)` 호출 |
+
+**메모리 로그 확인 (Render 로그)**
+
+```
+[메모리] VmRSS=XXX MB    ← sync 시작 전
+[메모리] VmRSS=YYY MB    ← sync 완료 후 (malloc_trim 이후)
+```
+
+sync 전후 차이가 크다면 해당 sync 단계에서 메모리가 누적되는 것입니다.

@@ -32,6 +32,15 @@ Authorization: Bearer <supabase_access_token>
 |----------|------|
 | 401 | 토큰 없음 / 만료 / 유효하지 않은 토큰 |
 | 403 | 이메일 화이트리스트 불일치 |
+| 429 | Rate Limit 초과 (120 req/min) |
+
+## Rate Limiting
+
+SlowAPI 미들웨어로 IP 기준 **120 req/min** 제한이 적용됩니다. 초과 시 `429 Too Many Requests` 반환.
+
+```json
+{ "detail": "Too many requests" }
+```
 
 ### 공통 응답 구조
 
@@ -1605,6 +1614,90 @@ FastAPI 시작 시 싱글턴 `kis_client` 인스턴스 생성. 첫 API 호출 �
 | 상태코드 | 의미 |
 |----------|------|
 | 200 | 정상 (KIS API 실패 시에도 캐시 있으면 200, 없으면 `status: error`) |
+
+---
+
+### GET /api/v1/market/treemap
+
+트리맵 히트맵 데이터를 반환합니다. SECTOR_STOCKS 유니버스(~100개 섹터 대표 종목)의 현재가·등락률·시가총액·수급 정보. in-memory 3분 캐시.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `sort` | string | `"change_rate"` | 정렬 기준: `change_rate` / `foreign_buy` / `institution_buy` |
+
+**응답 예시**
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "stock_code": "005930",
+      "stock_name": "삼성전자",
+      "current_price": 75000,
+      "change_rate": 1.23,
+      "market_cap": 4480000,
+      "foreign_net_buy": 520000,
+      "institution_net_buy": 120000
+    }
+  ]
+}
+```
+
+**KIS API 장애 시 동작**
+
+`inquire-price` 조회 실패(개별 종목) 시 `stock_ohlcv` 테이블의 직전 거래일 종가를 자동으로 사용합니다 (DB fallback). 종가 사용 시 `change_rate`는 `null`로 반환됩니다.
+
+| 상태코드 | 의미 |
+|----------|------|
+| 200 | 정상 (KIS 장애 시에도 DB fallback으로 응답) |
+
+---
+
+### GET /api/v1/market/index-chart
+
+KOSPI / KOSDAQ 지수 차트 시계열을 반환합니다.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `market` | string | `"kospi"` | `kospi` / `kosdaq` |
+| `period` | string | `"D"` | `D`(일) / `W`(주) / `M`(월) |
+
+---
+
+### GET /api/v1/market/investor-trend
+
+기관·외국인·개인 수급 집계를 반환합니다. KOSPI 기관·외국인 합산 순매수 상위 50종목 기준.
+
+---
+
+### GET /api/v1/market/adr
+
+등락비율(ADR) 시계열을 반환합니다.
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `days` | integer | 20 | 조회 기간 (일수) |
+
+---
+
+### GET /api/v1/market/sparkline/{code}
+
+종목의 최근 N일 종가 스파크라인 데이터를 반환합니다.
+
+**Path Parameters**: `code` — 종목 코드 (예: `005930`)
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `days` | integer | 5 | 조회 일수 |
 
 ---
 
