@@ -1,14 +1,16 @@
 import time
+from typing import Optional
 
 import jwt
 import httpx
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Security, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.algorithms import ECAlgorithm
 
 from app.core.config import settings
 
-_security = HTTPBearer()
+# auto_error=False: Bearer 없어도 자동 401 안 함 (AMPM 키 먼저 확인)
+_security = HTTPBearer(auto_error=False)
 
 _jwks_cache: dict | None = None
 _jwks_fetched_at: float = 0.0
@@ -34,7 +36,23 @@ def _get_public_key(kid: str):
     return ECAlgorithm.from_jwk(jwk)
 
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Security(_security)) -> dict:
+def verify_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_security),
+) -> dict:
+    # ── AMPM 앱 전용 API 키 (읽기 전용) ──────────────────────────
+    ampm_key = request.headers.get("X-AMPM-Key", "")
+    if ampm_key:
+        if not settings.ampm_api_key or ampm_key != settings.ampm_api_key:
+            raise HTTPException(status_code=401, detail="Invalid AMPM API key")
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            raise HTTPException(status_code=403, detail="AMPM 키는 읽기 전용입니다")
+        return {"sub": "ampm-app", "email": settings.allowed_user_email}
+
+    # ── 기존 Supabase JWT 검증 ────────────────────────────────────
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token = credentials.credentials
     try:
         header = jwt.get_unverified_header(token)

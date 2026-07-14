@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     enable_telegram: bool = False    # 텔레그램 알림 (Local only, Render 배포 제외)
+    ampm_api_key: str = ""           # AMPM 앱 전용 API 키 (X-AMPM-Key 헤더)
 
     class Config:
         env_file = ".env"
