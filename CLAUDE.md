@@ -34,11 +34,14 @@ KIS API로 실시간 시세·수급을 수집하고, 듀얼 엔진 기술 분석
 ```
 mpm/
 ├── CLAUDE.md                       ← 이 파일
+├── 00_OVERVIEW.md                  ← 진입점: 소개·기술스택·빠른시작·환경변수
+├── 01_HISTORY.md                   ← 개발 이력·의사결정·알고리즘 성능 현황
 ├── FEATURES.md                     ← 기능 명세 (최신 상태 유지)
-├── README.md                       ← 프로젝트 설명·구조·운영
+├── README.md                       ← GitHub 외부용 간략본 (문서 색인 역할)
+├── ALGORITHM.md                    ← 듀얼 엔진 기술 분석 알고리즘 상세
 ├── UI_SPEC.md                      ← 프론트엔드 UI 컴포넌트 상세
-├── TELEGRAM_BOT_PLAN.md            ← 양방향 텔레그램 봇 구현 계획 (미구현)
-├── MPM.md                          ← 간략 요약
+├── 06_PLANS.md                     ← 미구현 기능 계획 (양방향 텔레그램 봇 등)
+├── archive/MPM_INITIAL_SPEC.md     ← 초기 기획서 (참고용, 현재 구현과 불일치)
 ├── extract_all_trades.py           ← 가상거래 전체 체결내역 CSV 추출
 ├── extract_loss_trades.py          ← 가상거래 손실 체결내역 추출 (알고 개선용)
 ├── check.sh                        ← FE/BE 상태 확인·재시작·종료
@@ -175,7 +178,7 @@ Render BE (ENABLE_SCHEDULER=true)  → 08:50/11:00/14:00/16:10 일일 동기화 
 | `send_virtual_buy()` | 알고리즘 매수 체결 즉시 |
 | `send_virtual_sell()` | 알고리즘 매도 체결 즉시 |
 
-양방향 봇(커맨드 수신) 구현 계획은 `TELEGRAM_BOT_PLAN.md` 참조.
+양방향 봇(커맨드 수신) 구현 계획은 `06_PLANS.md` 참조.
 
 ---
 
@@ -203,9 +206,11 @@ RLS 전체 활성화 (`020_enable_rls.sql`) — anon 키 직접 접근 차단.
 
 - `FEATURES.md` — 기능 명세
 - `backend/API.md` — API 레퍼런스
-- `README.md` — 구조·운영
+- `00_OVERVIEW.md` — 환경변수·기술스택 변경 시
 - `UI_SPEC.md` — 프론트엔드 컴포넌트
 - `supabase/migrations/README.md` — 마이그레이션 이력
+
+이력·의사결정 기록은 `01_HISTORY.md`에 append.
 
 **제외**: `ANALYSIS_PROMPT.md` (AI 프롬프트 원문, 업데이트 대상 아님)
 
@@ -217,7 +222,7 @@ RLS 전체 활성화 (`020_enable_rls.sql`) — anon 키 직접 접근 차단.
 2. 여러 수정 사항을 묶어 1회 배포 (빌드 횟수 최소화)
 3. Render 빌드 파이프라인 분이 소진되면 해당 월 내 배포 불가 → 로컬 운영으로 전환
 
-> **현재 상태 (2026-06)**: Render 파이프라인 소진 → 로컬 서버에서 `ENABLE_SCHEDULER=true` + `ENABLE_INTRADAY=true` 운영 중. Render 배포 재개 시점: 2026-07.
+> **현재 상태 (2026-07)**: Render 재배포 완료 (AMPM 인증 포함). `ENABLE_SCHEDULER=true` Render 운영 중.
 
 ---
 

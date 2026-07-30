@@ -87,6 +87,8 @@
 
 ### 기술적 분석 (스코어 0–100) — 듀얼 엔진 구조
 
+> 배점 테이블·진입조건·청산 조건 상세 → `ALGORITHM.md`
+
 두 개의 독립 엔진 중 높은 점수를 최종 스코어로 채택: `score = max(engine_a, engine_b)`
 
 #### Stage 1 — Hard Filter

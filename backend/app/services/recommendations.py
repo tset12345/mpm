@@ -175,6 +175,9 @@ async def update_recommendations() -> list[dict]:
             price = _to_int(item.get("stck_prpr") or item.get("stck_clpr"))
             if not code:
                 continue
+            if len(code) > 12:
+                logger.warning(f"{log_label}: 비정상 코드 스킵 ({code!r}, {len(code)}자)")
+                continue
             source_map[code].add(src_label)   # 중복이어도 source는 기록
             if code in rank_map:
                 continue
