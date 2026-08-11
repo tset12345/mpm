@@ -158,6 +158,56 @@ async def run_intraday_trading():
         logger.error(f"장중 트레이딩 트리거 실패: {e}")
 
 
+async def run_recommendation_only():
+    """장 시작 직후 추천 종목만 빠르게 갱신 (09:10 KST).
+    OHLCV 동기화·가상거래 제외 — run_daily_sync 대비 메모리 절약.
+    """
+    global _sync_running
+    if _sync_running:
+        logger.warning("run_recommendation_only: run_daily_sync 실행 중 — 스킵")
+        return
+    _sync_running = True
+    from app.services.recommendations import update_recommendations
+    from app.services.history import save_snapshot
+    _log_rss()
+    logger.info("장 시작 후 추천 종목 갱신 시작 (OHLCV 제외)")
+    try:
+        stocks = await update_recommendations()
+        save_snapshot(stocks)
+        logger.info(f"장 시작 후 추천 종목 갱신 완료 — {len(stocks)}건")
+    except Exception as e:
+        logger.error(f"장 시작 후 추천 갱신 실패: {e}")
+    finally:
+        _sync_running = False
+        _trim_memory()
+        _log_rss()
+
+
+async def run_telegram_daily_report():
+    """Render 09:10 추천 갱신 완료 후 텔레그램 리포트 전송 (09:20 KST, 로컬 전용).
+    Render 완료 여부를 직접 확인할 수 없으므로 10분 지연 전송으로 안정성 확보.
+    """
+    from app.services.supabase_client import supabase
+    from app.services.telegram import send_recommendation_report
+    today = today_kst().isoformat()
+    try:
+        res = (
+            supabase.table("stock_recommendations")
+            .select("*")
+            .eq("date", today)
+            .order("total_score", desc=True)
+            .execute()
+        )
+        stocks = res.data or []
+        if not stocks:
+            logger.info("텔레그램 리포트: 오늘 추천 종목 없음 — 전송 스킵")
+            return
+        await send_recommendation_report(stocks)
+        logger.info(f"텔레그램 추천 리포트 전송 완료 — {len(stocks)}건")
+    except Exception as e:
+        logger.error(f"텔레그램 리포트 전송 실패: {e}")
+
+
 async def run_sector_leader_refresh():
     """장 시작 직후 전체 섹터 주도주 DB 갱신 (1일 1회, 09:05 KST)."""
     from app.services.sector_leader import refresh_all_sectors
@@ -215,7 +265,25 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=30,
         )
-        logger.info("일일 동기화 잡 등록 — 08:50/11:00/14:00/16:10 전체동기화 | 09:05 섹터주도주 (ENABLE_SCHEDULER=true)")
+        scheduler.add_job(
+            run_recommendation_only,
+            CronTrigger(hour=9, minute=10, day_of_week="mon-fri", timezone="Asia/Seoul"),
+            id="morning_open_recommendation",
+            replace_existing=True,
+            misfire_grace_time=30,
+        )
+        logger.info("일일 동기화 잡 등록 — 08:50/11:00/14:00/16:10 전체동기화 | 09:05 섹터주도주 | 09:10 추천갱신 (ENABLE_SCHEDULER=true)")
+
+    if settings.enable_telegram:
+        # Render 09:10 추천 갱신 완료 후 10분 대기, Supabase에서 읽어 텔레그램 전송
+        scheduler.add_job(
+            run_telegram_daily_report,
+            CronTrigger(hour=9, minute=20, day_of_week="mon-fri", timezone="Asia/Seoul"),
+            id="telegram_morning_report",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("텔레그램 추천 리포트 잡 등록 — 09:20 KST (ENABLE_TELEGRAM=true)")
 
     if settings.enable_intraday:
         # 장중 10분 단위 가상 매매 트리거 — 로컬 전용

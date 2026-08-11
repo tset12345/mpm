@@ -117,8 +117,13 @@ mpm/
 ### 현재 운영 방식 (2026-07 ~)
 
 ```
-Render BE (ENABLE_SCHEDULER=true)  → 08:50/11:00/14:00/16:10 일일 동기화 + 추천 알고리즘
-로컬 Mac  (ENABLE_INTRADAY=true)   → 09:00~15:20 매 10분 장중 실시간 트리거 + 텔레그램 알림
+Render BE (ENABLE_SCHEDULER=true)
+  → 08:50/11:00/14:00/16:10 전체 동기화 (추천+OHLCV+가상거래)
+  → 09:05 섹터 주도주 갱신
+  → 09:10 추천 종목만 경량 갱신 (OHLCV·가상거래 제외, 메모리 절약)
+
+로컬 Mac (ENABLE_INTRADAY=true)    → 09:00~15:20 매 10분 장중 실시간 트리거
+로컬 Mac (ENABLE_TELEGRAM=true)    → 09:20 Supabase 읽어 텔레그램 추천 리포트 전송
 ```
 
 - 로컬 Mac: caffeinate -si 슬립 방지 필수 (`check.sh --reboot --be`)
