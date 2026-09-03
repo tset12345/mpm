@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useSession } from "@/components/AuthProvider";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { loginAsGuest } = useSession();
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -52,6 +54,16 @@ export default function LoginPage() {
             {loading ? "로그인 중..." : "로그인"}
           </button>
         </form>
+        <div className="mt-4 pt-4 border-t">
+          <button
+            type="button"
+            onClick={loginAsGuest}
+            className="w-full text-gray-500 border border-gray-300 rounded py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            게스트 입장
+          </button>
+          <p className="text-xs text-gray-400 text-center mt-2">종목·히스토리·시장 탭 열람 가능</p>
+        </div>
       </div>
     </div>
   );

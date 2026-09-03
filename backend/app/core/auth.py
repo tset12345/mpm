@@ -49,6 +49,15 @@ def verify_token(
             raise HTTPException(status_code=403, detail="AMPM 키는 읽기 전용입니다")
         return {"sub": "ampm-app", "email": settings.allowed_user_email}
 
+    # ── 웹 게스트 읽기 전용 키 ───────────────────────────────────
+    guest_key = request.headers.get("X-Guest-Key", "")
+    if guest_key:
+        if not settings.guest_api_key or guest_key != settings.guest_api_key:
+            raise HTTPException(status_code=401, detail="Invalid guest key")
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            raise HTTPException(status_code=403, detail="게스트는 읽기 전용입니다")
+        return {"sub": "guest", "email": None, "is_guest": True}
+
     # ── 기존 Supabase JWT 검증 ────────────────────────────────────
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")

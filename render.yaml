@@ -34,3 +34,5 @@ services:
         value: "true"          # 일일 동기화 4회 + 섹터주도주
       - key: ENABLE_INTRADAY
         value: "false"         # 장중 10분 매매는 로컬에서만
+      - key: GUEST_API_KEY
+        sync: false

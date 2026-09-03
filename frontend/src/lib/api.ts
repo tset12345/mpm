@@ -1,12 +1,22 @@
 import { supabase } from "./supabase";
+import { GUEST_STORAGE_KEY } from "@/components/AuthProvider";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const GUEST_API_KEY = process.env.NEXT_PUBLIC_GUEST_API_KEY || "";
 
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const authHeader: Record<string, string> = session
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
+  const isGuest =
+    typeof window !== "undefined" &&
+    localStorage.getItem(GUEST_STORAGE_KEY) === "true";
+
+  let authHeader: Record<string, string>;
+  if (isGuest) {
+    authHeader = GUEST_API_KEY ? { "X-Guest-Key": GUEST_API_KEY } : {};
+  } else {
+    const { data: { session } } = await supabase.auth.getSession();
+    authHeader = session ? { Authorization: `Bearer ${session.access_token}` } : {};
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { ...authHeader, ...(options?.headers as Record<string, string> | undefined) },
