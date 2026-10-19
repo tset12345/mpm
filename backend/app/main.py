@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         await _YAHOO_CLIENT.aclose()
 
 
-app = FastAPI(title="MPM API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="MPM API", version="2.0.0-dev", lifespan=lifespan)
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 app.state.limiter = limiter

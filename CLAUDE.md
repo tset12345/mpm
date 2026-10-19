@@ -9,7 +9,7 @@
 **MPM (My Portfolio Manager)** — AI 기반 한국 주식 포트폴리오 관리 앱.  
 KIS API로 실시간 시세·수급을 수집하고, 듀얼 엔진 기술 분석으로 종목을 추천하며, 알고리즘 가상 거래를 시뮬레이션한다.
 
-- **경로**: `/Users/admin/work/mpm`
+- **경로**: `/Users/admin/work/stock/mpm`
 - **로그인 계정**: tjdtjd89@naver.com
 - **Hosting**: Render (BE) + Vercel (FE)
 
@@ -41,6 +41,8 @@ mpm/
 ├── ALGORITHM.md                    ← 듀얼 엔진 기술 분석 알고리즘 상세
 ├── UI_SPEC.md                      ← 프론트엔드 UI 컴포넌트 상세
 ├── 06_PLANS.md                     ← 미구현 기능 계획 (양방향 텔레그램 봇 등)
+├── ENHANCEMENT_V2.md               ← v2.0.0 고도화 분석·계획·단계별 진행 (브랜치 release/v2.0.0)
+├── CHANGELOG.md                    ← 버전별 변경 이력 (v1.0.0 태그 = 4103060)
 ├── archive/MPM_INITIAL_SPEC.md     ← 초기 기획서 (참고용, 현재 구현과 불일치)
 ├── extract_all_trades.py           ← 가상거래 전체 체결내역 CSV 추출
 ├── extract_loss_trades.py          ← 가상거래 손실 체결내역 추출 (알고 개선용)
