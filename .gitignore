@@ -34,3 +34,8 @@ Thumbs.db
 *.swp
 
 *.csv
+
+# test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
