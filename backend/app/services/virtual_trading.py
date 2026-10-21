@@ -4,20 +4,37 @@ from datetime import date, datetime, timezone, timedelta
 from math import floor
 
 from app.services.supabase_client import supabase
+from app.services.db_utils import fetch_all
 from app.services.technical import atr as calc_atr, sma, rsi
 
 logger = logging.getLogger(__name__)
 
 
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """앱 이벤트 루프를 등록한다. 매매 트리거는 스레드풀에서 돌기 때문에 알림을 이 루프로 넘겨야 한다."""
+    global _main_loop
+    _main_loop = loop
+
+
 def _fire_telegram(coro) -> None:
-    """실행 중인 이벤트 루프에 텔레그램 코루틴을 fire-and-forget으로 등록."""
+    """텔레그램 코루틴을 fire-and-forget으로 실행한다.
+
+    이벤트 루프 스레드에서는 태스크로 등록하고, 스레드풀에서 불리면 등록된 메인 루프로 넘긴다.
+    둘 다 불가능하면(스크립트 실행 등) 직접 실행한다.
+    """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(coro)
-        else:
-            loop.run_until_complete(coro)
+        try:
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            if _main_loop is not None and _main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, _main_loop)
+            else:
+                asyncio.run(coro)
     except Exception as e:
+        coro.close()
         logger.debug(f"텔레그램 알림 등록 실패: {e}")
 
 KST = timezone(timedelta(hours=9))
@@ -87,6 +104,11 @@ def get_account(account_id: int) -> dict | None:
 
 # ── 포지션 ────────────────────────────────────────────────────────────────────
 
+def get_position_codes(account_id: int) -> list[str]:
+    res = supabase.table("virtual_positions").select("stock_code").eq("account_id", account_id).execute()
+    return [r["stock_code"] for r in (res.data or [])]
+
+
 def get_positions(account_id: int,
                   realtime_prices: dict[str, int] | None = None) -> list[dict]:
     """포지션 조회.
@@ -134,7 +156,20 @@ def get_positions(account_id: int,
         # ② OHLCV 폴백 — 추천 테이블에 없는 종목
         missing = [c for c in codes if c not in price_map]
         if missing:
-            for code in missing:
+            recent_iso = (_today() - timedelta(days=30)).isoformat()
+            recent = fetch_all(lambda: (
+                supabase.table("stock_ohlcv")
+                .select("stock_code,trade_date,close_price")
+                .in_("stock_code", missing)
+                .gte("trade_date", recent_iso)
+                .order("trade_date", desc=True)
+                .order("stock_code")
+            ))
+            for row in recent:  # 최신순이므로 종목별 첫 행이 최신 종가
+                price_map.setdefault(row["stock_code"], int(row["close_price"]))
+                price_date_map.setdefault(row["stock_code"], row["trade_date"])
+            # 30일 내 시세가 없는 종목만 개별 조회 (거래정지 등 드문 경우)
+            for code in [c for c in missing if c not in price_map]:
                 ohlcv_res = (supabase.table("stock_ohlcv")
                              .select("trade_date,close_price")
                              .eq("stock_code", code)

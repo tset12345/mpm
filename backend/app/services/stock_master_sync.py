@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 
 import httpx
 from app.services.supabase_client import supabase
+from app.core.threads import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +79,9 @@ async def sync_stock_master() -> dict:
 
     chunk_size = 500
     for i in range(0, len(records), chunk_size):
-        supabase.table("stock_master").upsert(
-            records[i : i + chunk_size], on_conflict="stock_code"
-        ).execute()
+        chunk = records[i : i + chunk_size]
+        await run_blocking(
+            lambda: supabase.table("stock_master").upsert(chunk, on_conflict="stock_code").execute()
+        )
 
     return {"total": len(records)}

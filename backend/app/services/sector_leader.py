@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.core.threads import run_blocking
 from app.services.db_utils import fetch_all
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
@@ -259,12 +260,12 @@ async def get_sector_leaders(sector: str, market_regime: str = "BULL") -> list[d
     # ── 2. stock_master에서 종목명 조회 ──────────────────────────────────────
     valid_codes = list(snapshot.keys())
     try:
-        master_rows = (
-            supabase.table("stock_master")
+        master_rows = (await run_blocking(
+            lambda: supabase.table("stock_master")
             .select("stock_code,stock_name,market")
             .in_("stock_code", valid_codes)
             .execute()
-        ).data or []
+        )).data or []
         name_map   = {r["stock_code"]: r["stock_name"] for r in master_rows}
         market_map = {r["stock_code"]: r["market"]     for r in master_rows}
     except Exception as e:
@@ -280,14 +281,14 @@ async def get_sector_leaders(sector: str, market_regime: str = "BULL") -> list[d
     # ── 3. OHLCV DB 조회 (MA + 기술 분석용) ──────────────────────────────────
     start_iso = (date.today() - timedelta(days=130)).isoformat()
     try:
-        rows = fetch_all(lambda: (
+        rows = await run_blocking(lambda: fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,high_price,low_price,close_price,volume,trade_date")
             .in_("stock_code", valid_codes)
             .gte("trade_date", start_iso)
             .order("trade_date")
             .order("stock_code")
-        ))
+        )))
     except Exception as e:
         logger.warning(f"[sector_leader] DB 조회 실패: {e}")
         rows = []
@@ -409,13 +410,13 @@ async def get_sector_leaders_cached(sector: str, force: bool = False) -> tuple[l
     """DB 캐시 우선 반환. force=True 이면 KIS 재조회 후 저장."""
     if not force:
         try:
-            row = (
-                supabase.table("sector_leaders")
+            row = (await run_blocking(
+                lambda: supabase.table("sector_leaders")
                 .select("data,updated_at")
                 .eq("sector", sector)
                 .limit(1)
                 .execute()
-            ).data
+            )).data
             if row:
                 return row[0]["data"], row[0]["updated_at"]
         except Exception as e:
@@ -423,7 +424,7 @@ async def get_sector_leaders_cached(sector: str, force: bool = False) -> tuple[l
 
     leaders = await get_sector_leaders(sector)
     if leaders:
-        updated_at = _save_to_cache(sector, leaders)
+        updated_at = await run_blocking(_save_to_cache, sector, leaders)
     else:
         updated_at = None
     return leaders, updated_at
@@ -432,11 +433,11 @@ async def get_sector_leaders_cached(sector: str, force: bool = False) -> tuple[l
 async def get_all_sectors_cached() -> list[dict]:
     """모든 섹터의 캐시 데이터를 한 번에 반환 (DB 단일 조회)."""
     try:
-        rows = (
-            supabase.table("sector_leaders")
+        rows = (await run_blocking(
+            lambda: supabase.table("sector_leaders")
             .select("sector,data,updated_at")
             .execute()
-        ).data or []
+        )).data or []
         row_map = {r["sector"]: r for r in rows}
     except Exception as e:
         logger.warning(f"[sector_leader] 전체 캐시 조회 실패: {e}")
@@ -462,7 +463,7 @@ async def refresh_all_sectors() -> None:
         try:
             leaders = await get_sector_leaders(sector, market_regime=market_regime)
             if leaders:
-                _save_to_cache(sector, leaders)
+                await run_blocking(_save_to_cache, sector, leaders)
                 logger.info(f"[sector_leader] 갱신 완료: {sector} ({len(leaders)}개)")
             else:
                 logger.warning(f"[sector_leader] 빈 결과 — 캐시 유지: {sector}")

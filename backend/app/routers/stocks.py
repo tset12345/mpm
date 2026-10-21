@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.threads import run_blocking
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -13,6 +14,7 @@ from app.services.kis_api import kis_client
 from app.services.market_data import get_price_data, get_ohlcv_data
 from app.services.supabase_client import supabase
 from app.services.db_utils import fetch_all
+from app.services.cache import AsyncTTLCache
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
 from app.services.sector_leader import (
@@ -98,151 +100,162 @@ def remove_favorite(stock_code: str):
     return {"status": "success"}
 
 
+_recommend_cache = AsyncTTLCache(ttl=60, stale_ttl=600, max_size=2)
+_codes_cache = AsyncTTLCache(ttl=60, stale_ttl=600, max_size=2)
+
+
+def _load_recommendations() -> dict:
+    """추천 종목 목록(실시간가 반영 전)을 DB에서 만든다. 동기 함수라 스레드풀에서 실행한다."""
+    # 가장 최근 날짜 조회
+    latest = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
+    if not latest.data:
+        return {"rows": [], "date": None, "generated_at": None}
+    latest_date = latest.data[0]["date"]
+    # 해당 날짜의 종목을 total_score 내림차순으로 반환
+    result = supabase.table("stock_recommendations").select("*").eq("date", latest_date).order("total_score", desc=True).execute()
+    rows: list[dict] = result.data or []
+
+    if not rows:
+        return {"rows": [], "date": latest_date, "generated_at": None}
+
+    # 가장 최근 updated_at → generated_at
+    generated_at = max(
+        (r["updated_at"] for r in rows if r.get("updated_at")),
+        default=None,
+    )
+
+    # 연속 추천 일수 + 최초 추천 가격 계산
+    try:
+        past = supabase.table("stock_recommendations") \
+            .select("date,stock_code,entry_price") \
+            .neq("date", latest_date) \
+            .order("date", desc=True) \
+            .limit(14 * 30) \
+            .execute()
+        past_data = past.data or []
+        past_dates_sorted = sorted({r["date"] for r in past_data}, reverse=True)
+        past_set = {(r["date"], r["stock_code"]) for r in past_data}
+        past_entry_price: dict[tuple[str, str], int] = {
+            (r["date"], r["stock_code"]): r["entry_price"]
+            for r in past_data
+            if r.get("entry_price")
+        }
+        for row in rows:
+            streak = 1
+            first_date = latest_date
+            for d in past_dates_sorted:
+                if (d, row["stock_code"]) in past_set:
+                    streak += 1
+                    first_date = d
+                else:
+                    break
+            row["consecutive_days"] = streak
+            # 최초 추천 시점 가격: streak>1이면 과거 첫 날짜의 entry_price
+            if streak > 1:
+                row["first_entry_price"] = (
+                    past_entry_price.get((first_date, row["stock_code"]))
+                    or row.get("entry_price")
+                )
+            else:
+                row["first_entry_price"] = row.get("entry_price")
+    except Exception:
+        logger.warning("_load_recommendations: 연속 추천 일수 계산 실패", exc_info=True)
+        for row in rows:
+            row["consecutive_days"] = 1
+            row["first_entry_price"] = row.get("entry_price")
+
+    # 기술 점수·태그를 DB OHLCV 기준으로 실시간 재계산 (상세 페이지와 일치)
+    try:
+        codes = [r["stock_code"] for r in rows]
+        fresh = _recompute_scores(codes)
+        for row in rows:
+            ta = fresh.get(row["stock_code"])
+            if ta:
+                row["tech_score"]  = ta["score"]
+                row["total_score"] = ta["score"]
+                row["tags"]        = ta["tags"]
+    except Exception as e:
+        logger.warning(f"기술 점수 재계산 실패(저장값 사용): {e}")
+
+    # stock_master에서 KOSPI/KOSDAQ 시장 구분 추가
+    try:
+        codes = [r["stock_code"] for r in rows]
+        market_rows = supabase.table("stock_master").select("stock_code,market").in_("stock_code", codes).execute()
+        market_map = {r["stock_code"]: r["market"] for r in (market_rows.data or [])}
+        for row in rows:
+            row["market"] = market_map.get(row["stock_code"])
+    except Exception as e:
+        logger.warning(f"시장 구분 조회 실패: {e}")
+
+    rows.sort(key=lambda r: r.get("total_score") or 0, reverse=True)
+    return {"rows": rows, "date": latest_date, "generated_at": generated_at}
+
+
+def _price_fields(out: dict) -> tuple[int | None, float | None]:
+    cp = out.get("stck_prpr")
+    cr = out.get("prdy_ctrt")
+    return (int(cp) if cp else None, float(cr) if cr is not None else None)
+
+
 @router.get("/recommend")
 async def get_recommendations():
+    """오늘의 추천 종목. DB 기반 목록은 1분 캐시하고 현재가·등락률만 매 요청 시 덮어쓴다."""
     try:
-        # 가장 최근 날짜 조회
-        latest = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
-        if not latest.data:
-            return {"status": "success", "data": [], "date": None, "generated_at": None}
-        latest_date = latest.data[0]["date"]
-        # 해당 날짜의 종목을 total_score 내림차순으로 반환
-        result = supabase.table("stock_recommendations").select("*").eq("date", latest_date).order("total_score", desc=True).execute()
-        rows: list[dict] = result.data or []
-
-        if not rows:
-            return {"status": "success", "data": [], "date": latest_date, "generated_at": None}
-
-        # 가장 최근 updated_at → generated_at
-        generated_at = max(
-            (r["updated_at"] for r in rows if r.get("updated_at")),
-            default=None,
+        base = await _recommend_cache.get_or_load(
+            "recommend", lambda: run_blocking(_load_recommendations),
+            should_cache=lambda b: bool(b["rows"]),
         )
+        rows = [dict(r) for r in base["rows"]]  # 캐시 원본을 건드리지 않도록 복사
+        if not rows:
+            return {"status": "success", "data": [], "date": base["date"], "generated_at": None}
 
-        # 연속 추천 일수 + 최초 추천 가격 계산
+        # 현재가·등락률 KIS 조회(10초 캐시) — DB 스냅샷 덮어쓰기
+        async def _fetch_price(code: str) -> tuple[str, int | None, float | None]:
+            try:
+                cp, cr = _price_fields((await get_price_data(code)).get("output", {}))
+                return code, cp, cr
+            except Exception:
+                logger.debug("_fetch_price: 예외 무시하고 계속 진행", exc_info=True)
+                return code, None, None
+
         try:
-            past = supabase.table("stock_recommendations") \
-                .select("date,stock_code,entry_price") \
-                .neq("date", latest_date) \
-                .order("date", desc=True) \
-                .limit(14 * 30) \
-                .execute()
-            past_data = past.data or []
-            past_dates_sorted = sorted({r["date"] for r in past_data}, reverse=True)
-            past_set = {(r["date"], r["stock_code"]) for r in past_data}
-            past_entry_price: dict[tuple[str, str], int] = {
-                (r["date"], r["stock_code"]): r["entry_price"]
-                for r in past_data
-                if r.get("entry_price")
-            }
-            for row in rows:
-                streak = 1
-                first_date = latest_date
-                for d in past_dates_sorted:
-                    if (d, row["stock_code"]) in past_set:
-                        streak += 1
-                        first_date = d
-                    else:
-                        break
-                row["consecutive_days"] = streak
-                # 최초 추천 시점 가격: streak>1이면 과거 첫 날짜의 entry_price
-                if streak > 1:
-                    row["first_entry_price"] = (
-                        past_entry_price.get((first_date, row["stock_code"]))
-                        or row.get("entry_price")
-                    )
-                else:
-                    row["first_entry_price"] = row.get("entry_price")
-        except Exception:
-            logger.warning("get_recommendations: 예외 무시하고 계속 진행", exc_info=True)
-            for row in rows:
-                row["consecutive_days"] = 1
-                row["first_entry_price"] = row.get("entry_price")
-
-        # 기술 점수·태그를 DB OHLCV 기준으로 실시간 재계산 (상세 페이지와 일치)
-        try:
-            codes = [r["stock_code"] for r in rows]
-            fresh = _recompute_scores(codes)
-            for row in rows:
-                ta = fresh.get(row["stock_code"])
-                if ta:
-                    row["tech_score"]  = ta["score"]
-                    row["total_score"] = ta["score"]
-                    row["tags"]        = ta["tags"]
-        except Exception as e:
-            logger.warning(f"기술 점수 재계산 실패(저장값 사용): {e}")
-
-        # stock_master에서 KOSPI/KOSDAQ 시장 구분 추가
-        try:
-            codes = [r["stock_code"] for r in rows]
-            market_rows = supabase.table("stock_master").select("stock_code,market").in_("stock_code", codes).execute()
-            market_map = {r["stock_code"]: r["market"] for r in (market_rows.data or [])}
-            for row in rows:
-                row["market"] = market_map.get(row["stock_code"])
-        except Exception as e:
-            logger.warning(f"시장 구분 조회 실패: {e}")
-
-        rows.sort(key=lambda r: r.get("total_score") or 0, reverse=True)
-
-        # 현재가·등락률 KIS 실시간 조회 — DB 스냅샷 덮어쓰기
-        try:
-            codes = [r["stock_code"] for r in rows]
-            sem = asyncio.Semaphore(5)
-
-            async def _fetch_price(code: str) -> tuple[str, int | None, float | None]:
-                async with sem:
-                    try:
-                        out = (await get_price_data(code)).get("output", {})
-                        cp = out.get("stck_prpr")
-                        cr = out.get("prdy_ctrt")
-                        return (code,
-                                int(cp) if cp else None,
-                                float(cr) if cr is not None else None)
-                    except Exception:
-                        logger.debug("_fetch_price: 예외 무시하고 계속 진행", exc_info=True)
-                        return code, None, None
-
-            price_results = await asyncio.gather(*[_fetch_price(c) for c in codes])
-            for code, cp, cr in price_results:
+            by_code = {r["stock_code"]: r for r in rows}
+            for code, cp, cr in await asyncio.gather(*[_fetch_price(c) for c in by_code]):
                 if cp is not None:
-                    for row in rows:
-                        if row["stock_code"] == code:
-                            row["current_price"] = cp
-                            if cr is not None:
-                                row["change_rate"] = cr
-                            break
+                    by_code[code]["current_price"] = cp
+                    if cr is not None:
+                        by_code[code]["change_rate"] = cr
         except Exception as e:
             logger.warning(f"추천 종목 실시간가 조회 실패(DB값 유지): {e}")
 
-        return {"status": "success", "data": rows, "date": latest_date, "generated_at": generated_at}
+        return {"status": "success", "data": rows, "date": base["date"], "generated_at": base["generated_at"]}
     except Exception as e:
         logger.warning(f"추천 종목 조회 실패: {e}")
         return {"status": "success", "data": [], "date": None, "generated_at": None}
 
 
+def _load_recommended_codes() -> list[str]:
+    latest = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
+    if not latest.data:
+        return []
+    codes_res = supabase.table("stock_recommendations").select("stock_code").eq("date", latest.data[0]["date"]).execute()
+    return [r["stock_code"] for r in (codes_res.data or [])]
+
+
 @router.get("/recommend/prices")
 async def get_recommendation_prices():
-    """추천 종목 현재가·등락률만 실시간 KIS 조회 (프론트 폴링용)."""
+    """추천 종목 현재가·등락률만 조회 (프론트 폴링용). 종목별 10초 캐시를 공유한다."""
     try:
-        latest = supabase.table("stock_recommendations").select("date").order("date", desc=True).limit(1).execute()
-        if not latest.data:
-            return {"status": "success", "data": []}
-        latest_date = latest.data[0]["date"]
-        codes_res = supabase.table("stock_recommendations").select("stock_code").eq("date", latest_date).execute()
-        codes = [r["stock_code"] for r in (codes_res.data or [])]
+        codes = await _codes_cache.get_or_load(
+            "codes", lambda: run_blocking(_load_recommended_codes), should_cache=bool,
+        )
         if not codes:
             return {"status": "success", "data": []}
 
         async def _fetch(code: str) -> dict:
             try:
-                out = (await get_price_data(code)).get("output", {})
-                cp = out.get("stck_prpr")
-                cr = out.get("prdy_ctrt")
-                return {
-                    "stock_code":   code,
-                    "current_price": int(cp) if cp else None,
-                    "change_rate":  float(cr) if cr is not None else None,
-                }
+                cp, cr = _price_fields((await get_price_data(code)).get("output", {}))
+                return {"stock_code": code, "current_price": cp, "change_rate": cr}
             except Exception:
                 logger.debug("_fetch: 예외 무시하고 계속 진행", exc_info=True)
                 return {"stock_code": code, "current_price": None, "change_rate": None}
@@ -273,7 +286,9 @@ async def sync_recommendations():
         from app.services.recommendations import update_recommendations
         from app.services.history import save_snapshot
         stocks = await update_recommendations()
-        save_snapshot(stocks)
+        await run_blocking(save_snapshot, stocks)
+        _recommend_cache.invalidate()
+        _codes_cache.invalidate()
         return {"status": "success", "count": len(stocks), "data": stocks}
     except Exception as e:
         logger.error(f"추천 종목 동기화 실패: {e}")
@@ -293,7 +308,7 @@ async def sync_ohlcv_endpoint(body: OHLCVSyncRequest = OHLCVSyncRequest()):
 
 
 @router.get("/search")
-async def search_stocks(q: str = Query(..., min_length=1)):
+def search_stocks(q: str = Query(..., min_length=1)):
     """종목명 검색 — stock_master 테이블(KOSPI·KOSDAQ 전체 종목) 기반."""
     try:
         result = supabase.table("stock_master") \
@@ -320,6 +335,46 @@ async def sync_stock_master():
         raise internal_error("종목 마스터 동기화에 실패했습니다.")
 
 
+def _load_stock_detail_db(stock_code: str, start_iso: str) -> tuple[str, list[dict], str | None]:
+    """상세 화면에 필요한 DB 조회 묶음: (종목명, 일봉 캐시, 시장 구분). 실패해도 예외를 내지 않는다."""
+    stock_name = stock_code
+    try:
+        row = supabase.table("stock_recommendations").select("stock_name").eq("stock_code", stock_code).limit(1).execute()
+        if row.data:
+            stock_name = row.data[0]["stock_name"]
+        else:
+            hist = supabase.table("recommendation_history").select("stocks").eq("period_type", "daily").order("period_key", desc=True).limit(10).execute()
+            for h in (hist.data or []):
+                match = next((s["stock_name"] for s in h.get("stocks", []) if s.get("stock_code") == stock_code), None)
+                if match:
+                    stock_name = match
+                    break
+    except Exception:
+        logger.warning("종목명 조회 실패 %s", stock_code, exc_info=True)
+
+    db_rows: list[dict] = []
+    try:
+        db_rows = (
+            supabase.table("stock_ohlcv")
+            .select("trade_date,open_price,high_price,low_price,close_price,volume")
+            .eq("stock_code", stock_code)
+            .gte("trade_date", start_iso)
+            .order("trade_date")
+            .execute()
+        ).data or []
+    except Exception:
+        logger.warning("일봉 캐시 조회 실패 %s (KIS 결과로 대체)", stock_code, exc_info=True)
+
+    market: str | None = None
+    try:
+        mrow = supabase.table("stock_master").select("market").eq("stock_code", stock_code).limit(1).execute()
+        if mrow.data:
+            market = mrow.data[0]["market"]
+    except Exception:
+        logger.warning("시장 구분 조회 실패 %s", stock_code, exc_info=True)
+    return stock_name, db_rows, market
+
+
 @router.get("/{stock_code}/detail")
 async def get_stock_detail(stock_code: str):
     from app.services.ichimoku import calculate as ichimoku_calculate
@@ -339,9 +394,10 @@ async def get_stock_detail(stock_code: str):
     end = today.strftime("%Y%m%d")
 
     try:
-        price_data, ohlcv_data = await asyncio.gather(
+        price_data, ohlcv_data, (stock_name, db_rows, market) = await asyncio.gather(
             get_price_data(stock_code),
             get_ohlcv_data(stock_code, start, end),
+            run_blocking(_load_stock_detail_db, stock_code, (today - timedelta(days=130)).isoformat()),
         )
         fetched_at = datetime.now(timezone.utc).astimezone(
             timezone(timedelta(hours=9))
@@ -350,50 +406,21 @@ async def get_stock_detail(stock_code: str):
         logger.warning(f"종목 {stock_code} 데이터 조회 실패: {e}")
         raise internal_error("종목 데이터 조회에 실패했습니다.")
 
-    # Look up stock name: recommendations table → history JSONB → fallback to code
-    stock_name = stock_code
-    try:
-        row = supabase.table("stock_recommendations").select("stock_name").eq("stock_code", stock_code).limit(1).execute()
-        if row.data:
-            stock_name = row.data[0]["stock_name"]
-        else:
-            hist = supabase.table("recommendation_history").select("stocks").eq("period_type", "daily").order("period_key", desc=True).limit(10).execute()
-            for h in (hist.data or []):
-                match = next((s["stock_name"] for s in h.get("stocks", []) if s.get("stock_code") == stock_code), None)
-                if match:
-                    stock_name = match
-                    break
-    except Exception:
-        logger.warning("_float: 예외 무시하고 계속 진행", exc_info=True)
-
     output = price_data.get("output", {})
     kis_records = list(reversed(ohlcv_data.get("output2", [])))
 
     # DB 캐시(stock_ohlcv) 우선 사용 — 추천 목록과 동일한 데이터소스로 점수 일관성 확보
     records = kis_records
-    try:
-        start_iso = (today - timedelta(days=130)).isoformat()
-        db_rows = (
-            supabase.table("stock_ohlcv")
-            .select("trade_date,open_price,high_price,low_price,close_price,volume")
-            .eq("stock_code", stock_code)
-            .gte("trade_date", start_iso)
-            .order("trade_date")
-            .execute()
-        ).data or []
-        if len(db_rows) >= 30:
-            records = [
-                {
-                    "stck_clpr": str(r["close_price"]),
-                    "stck_hgpr": str(r["high_price"]),
-                    "stck_lwpr": str(r["low_price"]),
-                    "acml_vol":  str(r["volume"]),
-                }
-                for r in db_rows
-            ]
-    except Exception:
-        logger.warning("_float: 예외 무시하고 계속 진행", exc_info=True)
-        pass  # KIS API 결과로 폴백
+    if len(db_rows) >= 30:
+        records = [
+            {
+                "stck_clpr": str(r["close_price"]),
+                "stck_hgpr": str(r["high_price"]),
+                "stck_lwpr": str(r["low_price"]),
+                "acml_vol":  str(r["volume"]),
+            }
+            for r in db_rows
+        ]
 
     highs, lows, closes = [], [], []
     for r in records:
@@ -435,15 +462,6 @@ async def get_stock_detail(stock_code: str):
             return v if v else None
         except (ValueError, TypeError):
             return None
-
-    # stock_master에서 KOSPI/KOSDAQ 시장 구분 조회
-    market: str | None = None
-    try:
-        mrow = supabase.table("stock_master").select("market").eq("stock_code", stock_code).limit(1).execute()
-        if mrow.data:
-            market = mrow.data[0]["market"]
-    except Exception:
-        logger.warning("_int: 예외 무시하고 계속 진행", exc_info=True)
 
     return {
         "status": "success",

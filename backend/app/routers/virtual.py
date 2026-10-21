@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.threads import run_blocking
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -134,17 +135,14 @@ def delete_account(account_id: int):
 
 @router.get("/accounts/{account_id}/positions")
 async def get_positions(account_id: int):
-    _account_or_404(account_id)
+    await run_blocking(_account_or_404, account_id)
     try:
-        positions_raw = vt.get_positions(account_id, realtime_prices=None)
-        if not positions_raw:
-            return {"status": "success", "data": positions_raw}
+        codes = await run_blocking(vt.get_position_codes, account_id)
+        if not codes:
+            return {"status": "success", "data": []}
 
-        codes = list({p["stock_code"] for p in positions_raw})
-        realtime_prices = await _fetch_realtime_prices(codes)
-
-        data = (vt.get_positions(account_id, realtime_prices=realtime_prices)
-                if realtime_prices else positions_raw)
+        realtime_prices = await _fetch_realtime_prices(list(set(codes)))
+        data = await run_blocking(vt.get_positions, account_id, realtime_prices or None)
         return {"status": "success", "data": data}
     except Exception as e:
         raise internal_error("포지션 조회에 실패했습니다.")
@@ -163,16 +161,14 @@ def get_trades(account_id: int, limit: int = Query(100, le=500)):
 
 @router.get("/accounts/{account_id}/performance")
 async def get_performance(account_id: int):
-    _account_or_404(account_id)
+    await run_blocking(_account_or_404, account_id)
     try:
-        positions_raw = vt.get_positions(account_id, realtime_prices=None)
+        codes = await run_blocking(vt.get_position_codes, account_id)
         realtime_prices: dict[str, int] = {}
-        if positions_raw:
-            codes = list({p["stock_code"] for p in positions_raw})
-            realtime_prices = await _fetch_realtime_prices(codes)
+        if codes:
+            realtime_prices = await _fetch_realtime_prices(list(set(codes)))
 
-        data = vt.get_performance(account_id,
-                                   realtime_prices=realtime_prices or None)
+        data = await run_blocking(vt.get_performance, account_id, realtime_prices or None)
         if not data:
             raise HTTPException(status_code=404, detail="계좌를 찾을 수 없습니다.")
         return {"status": "success", "data": data}

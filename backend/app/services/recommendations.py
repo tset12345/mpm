@@ -7,6 +7,7 @@ from app.core.timezone import today_kst
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.core.threads import run_blocking
 from app.services.db_utils import fetch_all
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
@@ -81,14 +82,14 @@ async def _load_cached_ohlcv(codes: list[str], start_date_iso: str) -> dict[str,
     """Supabase stock_ohlcv에서 캐싱된 OHLCV 조회."""
     result: dict[str, list[dict]] = {code: [] for code in codes}
     try:
-        rows = fetch_all(lambda: (
+        rows = await run_blocking(lambda: fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,trade_date,open_price,high_price,low_price,close_price,volume")
             .in_("stock_code", codes)
             .gte("trade_date", start_date_iso)
             .order("trade_date")
             .order("stock_code")
-        ))
+        )))
         for row in rows:
             result[row["stock_code"]].append(row)
     except Exception as e:
@@ -296,7 +297,7 @@ async def update_recommendations() -> list[dict]:
             "daily_amount_e8":   daily_amount_e8,
         })
 
-    _upsert_rows(rows)
+    await run_blocking(_upsert_rows, rows)
     return rows
 
 

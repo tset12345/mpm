@@ -5,6 +5,7 @@ from datetime import timedelta
 from app.core.timezone import today_kst
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.core.threads import run_blocking
 from app.services.db_utils import fetch_all
 
 logger = logging.getLogger(__name__)
@@ -34,13 +35,13 @@ async def sync_ohlcv(stock_codes: list[str] | None = None) -> dict:
     already_synced: set[str] = set()
     if stock_codes:
         try:
-            rows_check = fetch_all(lambda: (
+            rows_check = await run_blocking(lambda: fetch_all(lambda: (
                 supabase.table("stock_ohlcv")
                 .select("stock_code")
                 .in_("stock_code", stock_codes)
                 .eq("trade_date", today_iso)
                 .order("stock_code")
-            ))
+            )))
             already_synced = {r["stock_code"] for r in rows_check}
             if already_synced:
                 logger.info(f"오늘 데이터 이미 존재 — {len(already_synced)}개 스킵")
@@ -91,10 +92,9 @@ async def sync_ohlcv(stock_codes: list[str] | None = None) -> dict:
             continue
 
         try:
-            supabase.table("stock_ohlcv").upsert(
-                rows,
-                on_conflict="stock_code,trade_date",
-            ).execute()
+            await run_blocking(
+                lambda: supabase.table("stock_ohlcv").upsert(rows, on_conflict="stock_code,trade_date").execute()
+            )
             total_rows += len(rows)
             logger.debug(f"{code} OHLCV {len(rows)}건 저장")
         except Exception as e:
