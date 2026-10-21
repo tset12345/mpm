@@ -11,6 +11,7 @@ from app.core.auth import verify_token
 from app.models.schemas import StockSummary, StockDetail, StockMetrics, IchimokuData
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.services.db_utils import fetch_all
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
 from app.services.sector_leader import (
@@ -27,14 +28,14 @@ def _recompute_scores(codes: list[str]) -> dict[str, dict]:
         return {}
     start_iso = (date.today() - timedelta(days=130)).isoformat()
     try:
-        rows = (
+        rows = fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,trade_date,high_price,low_price,close_price,volume")
             .in_("stock_code", codes)
             .gte("trade_date", start_iso)
             .order("trade_date")
-            .execute()
-        ).data or []
+            .order("stock_code")
+        ))
     except Exception:
         logger.warning("_recompute_scores: 예외 무시하고 계속 진행", exc_info=True)
         return {}

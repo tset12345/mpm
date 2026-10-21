@@ -11,9 +11,9 @@ class _Query:
         self.payload = None
         self.on_conflict = None
         self.filters = []
-        self.order_key = None
-        self.order_desc = False
+        self.orders = []
         self.limit_n = None
+        self.range_ = None
 
     def select(self, *_a, **_k):
         self.mode = "select"
@@ -48,7 +48,11 @@ class _Query:
         return self
 
     def order(self, col, desc=False):
-        self.order_key, self.order_desc = col, desc
+        self.orders.append((col, desc))
+        return self
+
+    def range(self, lo, hi):
+        self.range_ = (lo, hi)
         return self
 
     def limit(self, n):
@@ -85,14 +89,15 @@ class _Query:
             self.db.tables[self.name] = [r for r in table if r not in rows]
             return _Result(rows)
         rows = self._matching()
-        if self.order_key:
-            def key(r):
-                v = r.get(self.order_key)
-                return (v is None, v if v is not None else 0)
-
-            rows = sorted(rows, key=key, reverse=self.order_desc)
+        for col, desc in reversed(self.orders):
+            rows = sorted(rows, key=lambda r, c=col: (r.get(c) is None, r.get(c) if r.get(c) is not None else 0),
+                          reverse=desc)
+        if self.range_ is not None:
+            lo, hi = self.range_
+            rows = rows[lo: hi + 1]
         if self.limit_n is not None:
             rows = rows[: self.limit_n]
+        rows = rows[: self.db.max_rows]
         return _Result([dict(r) for r in rows])
 
 
@@ -102,6 +107,7 @@ class FakeSupabase:
     def __init__(self):
         self.tables: dict[str, list[dict]] = {}
         self._id = 0
+        self.max_rows = 1000  # PostgREST 기본 응답 상한
 
     def next_id(self):
         self._id += 1

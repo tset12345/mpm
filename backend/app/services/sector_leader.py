@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.services.kis_api import kis_client
 from app.services.supabase_client import supabase
+from app.services.db_utils import fetch_all
 from app.services import technical
 from app.services.ichimoku import calculate as ichimoku_calculate
 
@@ -279,14 +280,14 @@ async def get_sector_leaders(sector: str, market_regime: str = "BULL") -> list[d
     # ── 3. OHLCV DB 조회 (MA + 기술 분석용) ──────────────────────────────────
     start_iso = (date.today() - timedelta(days=130)).isoformat()
     try:
-        rows = (
+        rows = fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,high_price,low_price,close_price,volume,trade_date")
             .in_("stock_code", valid_codes)
             .gte("trade_date", start_iso)
             .order("trade_date")
-            .execute()
-        ).data or []
+            .order("stock_code")
+        ))
     except Exception as e:
         logger.warning(f"[sector_leader] DB 조회 실패: {e}")
         rows = []

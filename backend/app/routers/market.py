@@ -15,6 +15,7 @@ from app.core.auth import verify_token
 from app.services.kis_api import kis_client
 from app.services.sector_leader import SECTOR_STOCKS
 from app.services.supabase_client import supabase
+from app.services.db_utils import fetch_all
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,14 @@ def _load_treemap_from_db(code_sector: dict[str, str]) -> list[dict]:
     try:
         codes = list(code_sector.keys())
         start_iso = (date.today() - timedelta(days=10)).isoformat()
-        rows = (
+        rows = fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,trade_date,close_price,volume")
             .in_("stock_code", codes)
             .gte("trade_date", start_iso)
             .order("trade_date", desc=True)
-            .execute()
-        ).data or []
+            .order("stock_code")
+        ))
 
         by_code: dict[str, list] = defaultdict(list)
         for r in rows:
@@ -262,13 +263,13 @@ def get_adr(days: int = Query(60, ge=1, le=365)):
     """등락비율(ADR) — stock_ohlcv DB에서 계산"""
     try:
         start_iso = (date.today() - timedelta(days=days + 10)).isoformat()
-        rows = (
+        rows = fetch_all(lambda: (
             supabase.table("stock_ohlcv")
             .select("stock_code,trade_date,close_price")
             .gte("trade_date", start_iso)
             .order("trade_date")
-            .execute()
-        ).data or []
+            .order("stock_code")
+        ))
 
         # stock_code → [(date, close), ...]
         by_stock: dict[str, list[tuple[str, float]]] = defaultdict(list)
