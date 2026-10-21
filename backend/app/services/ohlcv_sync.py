@@ -44,7 +44,7 @@ async def sync_ohlcv(stock_codes: list[str] | None = None) -> dict:
             if already_synced:
                 logger.info(f"오늘 데이터 이미 존재 — {len(already_synced)}개 스킵")
         except Exception:
-            pass
+            logger.debug("sync_ohlcv: 예외 무시하고 계속 진행", exc_info=True)
 
     total_rows = 0
     errors = []

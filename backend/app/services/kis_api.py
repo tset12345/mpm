@@ -1,8 +1,11 @@
+import logging
 import json
 import time
 import httpx
 from pathlib import Path
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 BASE_URL_MOCK = "https://openapivts.koreainvestment.com:29443"
 BASE_URL_REAL = "https://openapi.koreainvestment.com:9443"
@@ -38,7 +41,7 @@ class KISApiClient:
                     self._access_token = data["token"]
                     self._token_expires_at = data["expires_at"]
         except Exception:
-            pass
+            logger.warning("_load_token_cache: 예외 무시하고 계속 진행", exc_info=True)
 
     def _save_token_cache(self):
         try:
@@ -48,7 +51,7 @@ class KISApiClient:
                 "base_url": self.base_url,
             }))
         except Exception:
-            pass
+            logger.warning("_save_token_cache: 예외 무시하고 계속 진행", exc_info=True)
 
     async def _get_token(self) -> str:
         if self._access_token and time.time() < self._token_expires_at - 300:

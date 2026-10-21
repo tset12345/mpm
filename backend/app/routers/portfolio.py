@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.errors import internal_error
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -115,13 +116,13 @@ async def create_analysis(body: AnalysisRequest):
                 profile_name = p.data[0]["name"]
                 analysis_type = p.data[0].get("analysis_type") or "quant"
         except Exception:
-            pass
+            logger.warning("create_analysis: 예외 무시하고 계속 진행", exc_info=True)
 
     try:
         text = await run_analysis(holdings, profile_name, analysis_type)
     except Exception as e:
         logger.error(f"포트폴리오 분석 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"AI 분석 실패: {e}")
+        raise internal_error("AI 분석에 실패했습니다.")
 
     try:
         _upsert(body.profile_id, text, h_hash)

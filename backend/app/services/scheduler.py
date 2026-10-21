@@ -23,7 +23,7 @@ def _log_rss() -> int:
                     logger.info(f"[메모리] VmRSS={rss_mb} MB")
                     return rss_mb
     except Exception:
-        pass
+        logger.debug("_log_rss: 예외 무시하고 계속 진행", exc_info=True)
     return 0
 
 
@@ -33,7 +33,7 @@ def _trim_memory():
     try:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
-        pass
+        logger.debug("_trim_memory: 예외 무시하고 계속 진행", exc_info=True)
 
 # run_daily_sync() 중복 실행 방지 플래그
 _sync_running = False

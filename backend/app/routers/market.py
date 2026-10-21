@@ -40,6 +40,7 @@ def _sf(val, default: float = 0.0) -> float:
     try:
         return float(str(val).replace("+", "").replace(",", "").strip()) if val else default
     except Exception:
+        logger.warning("_sf: 예외 무시하고 계속 진행", exc_info=True)
         return default
 
 
@@ -217,7 +218,7 @@ async def get_index_chart(
         return {"status": "success", "market": market, "period": period, "data": candles}
     except Exception as e:
         logger.warning(f"[market/index-chart] 조회 실패: {e}")
-        return {"status": "error", "market": market, "period": period, "data": [], "detail": str(e)}
+        return {"status": "error", "market": market, "period": period, "data": [], "detail": "지수 차트 조회에 실패했습니다."}
 
 
 # ── 수급 집계 ─────────────────────────────────────────────────────────────────

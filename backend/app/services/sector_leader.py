@@ -330,6 +330,7 @@ async def get_sector_leaders(sector: str, market_regime: str = "BULL") -> list[d
             try:
                 cloud_pos = ichimoku_calculate(highs_list, lows_list, closes_list).get("position", "unknown")
             except Exception:
+                logger.debug("get_sector_leaders: 예외 무시하고 계속 진행", exc_info=True)
                 cloud_pos = "unknown"
             ta = technical.analyze(records, cloud_position=cloud_pos, market_regime=market_regime)
         else:

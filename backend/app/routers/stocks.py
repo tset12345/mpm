@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.errors import internal_error
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -35,6 +36,7 @@ def _recompute_scores(codes: list[str]) -> dict[str, dict]:
             .execute()
         ).data or []
     except Exception:
+        logger.warning("_recompute_scores: 예외 무시하고 계속 진행", exc_info=True)
         return {}
 
     by_code: dict[str, list[dict]] = {c: [] for c in codes}
@@ -56,6 +58,7 @@ def _recompute_scores(codes: list[str]) -> dict[str, dict]:
         try:
             cloud = ichimoku_calculate(highs, lows, closes).get("position", "unknown")
         except Exception:
+            logger.debug("_recompute_scores: 예외 무시하고 계속 진행", exc_info=True)
             cloud = "unknown"
         ta = technical.analyze(records, cloud_position=cloud)
         result[code] = ta
@@ -149,6 +152,7 @@ async def get_recommendations():
                 else:
                     row["first_entry_price"] = row.get("entry_price")
         except Exception:
+            logger.warning("get_recommendations: 예외 무시하고 계속 진행", exc_info=True)
             for row in rows:
                 row["consecutive_days"] = 1
                 row["first_entry_price"] = row.get("entry_price")
@@ -193,6 +197,7 @@ async def get_recommendations():
                                 int(cp) if cp else None,
                                 float(cr) if cr is not None else None)
                     except Exception:
+                        logger.debug("_fetch_price: 예외 무시하고 계속 진행", exc_info=True)
                         return code, None, None
 
             price_results = await asyncio.gather(*[_fetch_price(c) for c in codes])
@@ -237,6 +242,7 @@ async def get_recommendation_prices():
                     "change_rate":  float(cr) if cr is not None else None,
                 }
             except Exception:
+                logger.debug("_fetch: 예외 무시하고 계속 진행", exc_info=True)
                 return {"stock_code": code, "current_price": None, "change_rate": None}
 
         results = await asyncio.gather(*[_fetch(c) for c in codes], return_exceptions=True)
@@ -255,7 +261,7 @@ def get_recommendation_history(type: str = Query("daily", pattern="^(daily|weekl
         data = get_history(type)
         return {"status": "success", "period_type": type, "data": data}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("추천 이력 조회에 실패했습니다.")
 
 
 @router.post("/sync/recommendations")
@@ -269,7 +275,7 @@ async def sync_recommendations():
         return {"status": "success", "count": len(stocks), "data": stocks}
     except Exception as e:
         logger.error(f"추천 종목 동기화 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("추천 동기화에 실패했습니다.")
 
 
 @router.post("/sync/ohlcv")
@@ -281,7 +287,7 @@ async def sync_ohlcv_endpoint(body: OHLCVSyncRequest = OHLCVSyncRequest()):
         return {"status": "success", **result}
     except Exception as e:
         logger.error(f"OHLCV 동기화 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("OHLCV 동기화에 실패했습니다.")
 
 
 @router.get("/search")
@@ -309,7 +315,7 @@ async def sync_stock_master():
         return {"status": "success", **result}
     except Exception as e:
         logger.error(f"종목 마스터 동기화 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("종목 마스터 동기화에 실패했습니다.")
 
 
 @router.get("/{stock_code}/detail")
@@ -340,7 +346,7 @@ async def get_stock_detail(stock_code: str):
         ).strftime("%Y-%m-%d %H:%M:%S")
     except Exception as e:
         logger.warning(f"종목 {stock_code} 데이터 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"종목 데이터 조회 실패: {e}")
+        raise internal_error("종목 데이터 조회에 실패했습니다.")
 
     # Look up stock name: recommendations table → history JSONB → fallback to code
     stock_name = stock_code
@@ -356,7 +362,7 @@ async def get_stock_detail(stock_code: str):
                     stock_name = match
                     break
     except Exception:
-        pass
+        logger.warning("_float: 예외 무시하고 계속 진행", exc_info=True)
 
     output = price_data.get("output", {})
     kis_records = list(reversed(ohlcv_data.get("output2", [])))
@@ -384,6 +390,7 @@ async def get_stock_detail(stock_code: str):
                 for r in db_rows
             ]
     except Exception:
+        logger.warning("_float: 예외 무시하고 계속 진행", exc_info=True)
         pass  # KIS API 결과로 폴백
 
     highs, lows, closes = [], [], []
@@ -434,7 +441,7 @@ async def get_stock_detail(stock_code: str):
         if mrow.data:
             market = mrow.data[0]["market"]
     except Exception:
-        pass
+        logger.warning("_int: 예외 무시하고 계속 진행", exc_info=True)
 
     return {
         "status": "success",

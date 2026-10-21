@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.errors import internal_error
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -125,7 +126,7 @@ async def list_holdings(profile_id: Optional[int] = Query(None)):
         result = q.execute()
         rows: list[dict] = result.data or []
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("보유 종목 조회에 실패했습니다.")
 
     if not rows:
         return {"status": "success", "data": [], "summary": _empty_summary(), "price_fetched_at": None}
@@ -139,7 +140,7 @@ async def list_holdings(profile_id: Optional[int] = Query(None)):
         mrows = supabase.table("stock_master").select("stock_code,market").in_("stock_code", codes).execute()
         market_map = {r["stock_code"]: r["market"] for r in (mrows.data or [])}
     except Exception:
-        pass
+        logger.warning("list_holdings: 예외 무시하고 계속 진행", exc_info=True)
 
     enriched = [_enrich(r, prices, price_times) for r in rows]
     for h in enriched:
@@ -169,7 +170,7 @@ async def create_holding(body: HoldingCreate):
         result = supabase.table("holdings").insert(record).execute()
         return {"status": "success", "data": result.data[0] if result.data else record}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("보유 종목 등록에 실패했습니다.")
 
 
 @router.put("/{holding_id}")
@@ -196,7 +197,7 @@ async def update_holding(holding_id: int, body: HoldingUpdate):
         )
         return {"status": "success", "data": result.data[0] if result.data else {}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="보유 종목 업데이트에 실패했습니다.")
+        raise internal_error("보유 종목 업데이트에 실패했습니다.")
 
 
 @router.get("/{holding_id}/sell-analysis")
@@ -222,7 +223,7 @@ async def get_sell_analysis(holding_id: int):
             kis_client.get_daily_ohlcv(stock_code, start, end),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"시세 조회 실패: {e}")
+        raise internal_error("시세 조회에 실패했습니다.")
 
     output  = price_data.get("output", {})
     records = list(reversed(ohlcv_data.get("output2", [])))
@@ -254,7 +255,7 @@ async def get_sell_analysis(holding_id: int):
         if current_price and total_eval > 0:
             portfolio_weight = round(current_price * quantity / total_eval * 100, 1)
     except Exception:
-        pass
+        logger.warning("_flt: 예외 무시하고 계속 진행", exc_info=True)
 
     # 4. 매도 신호 분석
     result = analyze_sell(
@@ -280,7 +281,7 @@ async def delete_holding(holding_id: int):
         supabase.table("holdings").delete().eq("id", holding_id).execute()
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="보유 종목 삭제에 실패했습니다.")
+        raise internal_error("보유 종목 삭제에 실패했습니다.")
 
 
 def _empty_summary() -> dict:

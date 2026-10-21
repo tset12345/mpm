@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.errors import internal_error
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -96,7 +97,7 @@ def list_accounts(profile_id: Optional[int] = Query(None)):
     try:
         return {"status": "success", "data": vt.list_accounts(profile_id)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("가상 계좌 목록 조회에 실패했습니다.")
 
 
 @router.post("/accounts")
@@ -105,7 +106,7 @@ def create_account(body: AccountCreate):
         account = vt.create_account(body.model_dump())
         return {"status": "success", "data": account}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("가상 계좌 생성에 실패했습니다.")
 
 
 @router.patch("/accounts/{account_id}")
@@ -116,7 +117,7 @@ def update_account(account_id: int, body: AccountUpdate):
         account = vt.update_account(account_id, updates)
         return {"status": "success", "data": account}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="계좌 업데이트에 실패했습니다.")
+        raise internal_error("계좌 업데이트에 실패했습니다.")
 
 
 @router.delete("/accounts/{account_id}")
@@ -126,7 +127,7 @@ def delete_account(account_id: int):
         vt.delete_account(account_id)
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="계좌 삭제에 실패했습니다.")
+        raise internal_error("계좌 삭제에 실패했습니다.")
 
 
 # ── 포지션 · 체결 내역 ─────────────────────────────────────────────────────────
@@ -146,7 +147,7 @@ async def get_positions(account_id: int):
                 if realtime_prices else positions_raw)
         return {"status": "success", "data": data}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("포지션 조회에 실패했습니다.")
 
 
 @router.get("/accounts/{account_id}/trades")
@@ -155,7 +156,7 @@ def get_trades(account_id: int, limit: int = Query(100, le=500)):
     try:
         return {"status": "success", "data": vt.get_trades(account_id, limit)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="거래 내역 조회에 실패했습니다.")
+        raise internal_error("거래 내역 조회에 실패했습니다.")
 
 
 # ── 성과 지표 ─────────────────────────────────────────────────────────────────
@@ -178,7 +179,7 @@ async def get_performance(account_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("성과 조회에 실패했습니다.")
 
 
 # ── 수동 체결 ─────────────────────────────────────────────────────────────────
@@ -201,4 +202,4 @@ def manual_trade(account_id: int, body: ManualTradeRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("수동 체결에 실패했습니다.")

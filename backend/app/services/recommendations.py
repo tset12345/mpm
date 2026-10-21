@@ -235,6 +235,7 @@ async def update_recommendations() -> list[dict]:
         try:
             cloud_position = ichimoku_calculate(highs, lows, closes).get("position", "unknown")
         except Exception:
+            logger.debug("_analyze_with_ichimoku: 예외 무시하고 계속 진행", exc_info=True)
             cloud_position = "unknown"
         return technical.analyze(records, cloud_position=cloud_position, market_regime=market_regime)
 

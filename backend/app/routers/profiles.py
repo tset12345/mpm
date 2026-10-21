@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
+from app.core.errors import internal_error
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -26,7 +27,7 @@ def list_profiles():
         result = supabase.table("profiles").select("*").order("created_at").execute()
         return {"status": "success", "data": result.data or []}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("프로필 목록 조회에 실패했습니다.")
 
 
 @router.post("")
@@ -39,7 +40,7 @@ def create_profile(body: ProfileCreate):
         result = supabase.table("profiles").insert({"name": name, "analysis_type": analysis_type}).execute()
         return {"status": "success", "data": result.data[0] if result.data else {}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("프로필 생성에 실패했습니다.")
 
 
 @router.put("/{profile_id}")
@@ -60,7 +61,7 @@ def update_profile(profile_id: int, body: ProfileUpdate):
         result = supabase.table("profiles").update(updates).eq("id", profile_id).execute()
         return {"status": "success", "data": result.data[0] if result.data else {}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("프로필 수정에 실패했습니다.")
 
 
 @router.delete("/{profile_id}")
@@ -69,4 +70,4 @@ def delete_profile(profile_id: int):
         supabase.table("profiles").delete().eq("id", profile_id).execute()
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error("프로필 삭제에 실패했습니다.")

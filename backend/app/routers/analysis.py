@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.errors import internal_error
 
 from app.core.auth import verify_token
 from app.services.kis_api import kis_client
@@ -89,7 +90,7 @@ async def run_analysis(
             kis_client.get_daily_ohlcv(stock_code, start_date, end_date),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"KIS API 조회 실패: {e}")
+        raise internal_error("분석에 실패했습니다.")
 
     output = price_data.get("output", {})
     current_price = _float(output.get("stck_prpr"))
@@ -155,7 +156,7 @@ async def run_analysis(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"[{strategy_type}] 분석 실패 ({stock_code}): {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"분석 실패: {e}")
+        raise internal_error("분석에 실패했습니다.")
 
     analyzed_at = datetime.now(KST).isoformat()
 

@@ -1,4 +1,7 @@
+import logging
 from datetime import date, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def calculate(highs: list[float], lows: list[float], closes: list[float]) -> dict:
@@ -53,6 +56,7 @@ async def fetch_and_calculate(stock_code: str, kis_client) -> dict:
         data = await kis_client.get_daily_ohlcv(stock_code, start, end)
         records = data.get("output2", [])
     except Exception:
+        logger.warning("fetch_and_calculate: 예외 무시하고 계속 진행", exc_info=True)
         return {"conversion_line": 0, "base_line": 0, "span_a": 0, "span_b": 0, "position": "unknown"}
 
     if not records:
