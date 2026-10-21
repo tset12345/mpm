@@ -271,19 +271,32 @@ def test_positions_fallback_uses_one_batch_query(monkeypatch):
     assert reads.count("stock_ohlcv") == 2
 
 
-def test_many_polling_clients_cost_one_kis_call_per_code(rec_env):
-    _, calls = rec_env
+@pytest.fixture
+def kis_env(rec_env, monkeypatch):
+    """get_price_data(캐시 계층)는 그대로 두고 KIS 클라이언트만 가짜로 바꿔 호출 횟수를 센다."""
+    monkeypatch.setattr(stocks, "get_price_data", market_data.get_price_data)
+    market_data._price_cache.invalidate()
+    calls = {"kis": 0}
 
+    async def fake_kis(code):
+        calls["kis"] += 1
+        await asyncio.sleep(0.01)
+        return {"output": {"stck_prpr": "150", "prdy_ctrt": "2.5"}}
+
+    monkeypatch.setattr(market_data.kis_client, "get_stock_price", fake_kis)
+    return calls
+
+
+def test_many_polling_clients_cost_one_kis_call_per_code(kis_env):
     async def go():
         return await asyncio.gather(*[stocks.get_recommendation_prices() for _ in range(50)])
 
     results = run(go())
     assert all(len(r["data"]) == 2 for r in results)
-    assert calls["price"] == 2  # 50명이 동시에 폴링해도 종목 수(2)만큼만 KIS 호출 (이전: 50 x 2 = 100)
+    assert kis_env["kis"] == 2  # 50명이 동시에 폴링해도 종목 수(2)만큼만 KIS 호출 (이전: 50 x 2 = 100)
 
 
-def test_rapid_second_poll_within_ttl_makes_no_kis_calls(rec_env):
-    _, calls = rec_env
+def test_rapid_second_poll_within_ttl_makes_no_kis_calls(kis_env):
     run(stocks.get_recommendation_prices())
     run(stocks.get_recommendation_prices())
-    assert calls["price"] == 2
+    assert kis_env["kis"] == 2
