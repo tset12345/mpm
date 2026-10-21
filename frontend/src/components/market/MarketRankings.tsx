@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { api } from "@/lib/api";
-import { useSession } from "@/components/AuthProvider";
+import { useState } from "react";
+import { useMarketRankings } from "@/lib/hooks";
+import ErrorNotice from "@/components/ui/ErrorNotice";
+import Skeleton from "@/components/ui/Skeleton";
 import type { MarketRankings, RankingStock } from "@/lib/types";
 
 function fmtAmt(n: number): string {
@@ -145,28 +146,12 @@ const SECTIONS: {
 ];
 
 export default function MarketRankings() {
-  const session = useSession();
-  const [rankings, setRankings] = useState<MarketRankings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
-
-  const fetchData = useCallback(async () => {
-    if (!session) return;
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const res = await api.getMarketRankings(5);
-      setRankings(res.data ?? null);
-      setFetchedAt(new Date());
-    } catch (err: unknown) {
-      setFetchError(err instanceof Error ? err.message : "데이터 조회 실패");
-    } finally {
-      setLoading(false);
-    }
-  }, [session]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const query = useMarketRankings(5, { onSuccess: () => setFetchedAt(new Date()) });
+  const rankings: MarketRankings | null = query.data?.data ?? null;
+  const loading = query.isValidating;
+  const fetchError = query.error;
+  const fetchData = () => query.mutate();
 
   return (
     <div className="space-y-4">
@@ -183,14 +168,12 @@ export default function MarketRankings() {
         </button>
       </div>
 
-      {fetchError && (
-        <div className="text-sm text-red-500 bg-red-50 rounded-lg px-4 py-3">{fetchError}</div>
-      )}
+      {fetchError && <ErrorNotice error={fetchError} onRetry={fetchData} retrying={loading} />}
 
       {loading && !rankings ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[...Array(8)].map((_, i) => (
-            <div key={i} className="rounded-xl border bg-gray-50 h-44 animate-pulse" />
+            <Skeleton key={i} className="h-44 border" />
           ))}
         </div>
       ) : rankings ? (

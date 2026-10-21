@@ -109,3 +109,48 @@ def test_setup_logging_honours_env(monkeypatch):
     finally:
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
+
+
+def _boom_route(path):
+    async def handler():
+        raise RuntimeError("SECRET")
+    app.add_api_route(path, handler, methods=["GET"])
+
+
+def test_unhandled_500_carries_cors_headers_for_allowed_origin():
+    _boom_route("/__boom_cors")
+    try:
+        r = client.get("/__boom_cors", headers={"Origin": "http://localhost:3000", **_auth()})
+    finally:
+        app.router.routes.pop()
+    assert r.status_code == 500
+    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "X-Request-ID" in r.headers["access-control-expose-headers"]
+    assert "SECRET" not in r.text
+
+
+def test_unhandled_500_has_no_cors_for_unknown_origin():
+    _boom_route("/__boom_cors2")
+    try:
+        r = client.get("/__boom_cors2", headers={"Origin": "https://evil.example", **_auth()})
+    finally:
+        app.router.routes.pop()
+    assert r.status_code == 500
+    assert "access-control-allow-origin" not in r.headers
+
+
+def test_cors_exposes_retry_after_and_request_id_on_normal_responses():
+    r = client.get("/api/v1/health", headers={"Origin": "http://localhost:3000"})
+    exposed = r.headers["access-control-expose-headers"]
+    assert "Retry-After" in exposed and "X-Request-ID" in exposed
+
+
+def test_429_response_is_readable_cross_origin(monkeypatch):
+    from app.core.config import settings as s
+    monkeypatch.setattr(s, "rate_limit_ip_per_min", 1)
+    h = {"Origin": "http://localhost:3000"}
+    client.get("/api/v1/holdings", headers=h)
+    r = client.get("/api/v1/holdings", headers=h)
+    assert r.status_code == 429
+    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert r.headers["retry-after"].isdigit()

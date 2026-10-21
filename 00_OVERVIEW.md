@@ -90,6 +90,9 @@ cp backend/.env.example backend/.env
 | `./check.sh` | FE + BE 상태 확인 |
 | `./check.sh --reboot --be` | 백엔드 재시작 (caffeinate -si 슬립 방지 포함) |
 | `./check.sh --reboot --fe` | 프론트엔드만 재시작 (PORT=3000 고정) |
+| `cd frontend && npm test` | 프론트 단위 테스트 (vitest) |
+
+> **주의**: 개발 서버(`next dev`)가 떠 있는 동안 `frontend`에서 `npx next build`를 실행하지 마세요. 같은 `.next` 폴더를 덮어써 로컬 화면이 404가 됩니다. 타입 확인은 `npx tsc --noEmit`을 쓰세요.
 | `./check.sh --close` | FE + BE 전체 종료 |
 
 > **포트 3001 주의**: `check.sh`는 포트 3001을 절대 종료하지 않음 (ARA 프로젝트 전용).

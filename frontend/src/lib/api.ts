@@ -1,8 +1,11 @@
 import { supabase } from "./supabase";
 import { GUEST_STORAGE_KEY } from "@/components/AuthProvider";
+import { ApiError } from "./errors";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const GUEST_API_KEY = process.env.NEXT_PUBLIC_GUEST_API_KEY || "";
+
+const REQUEST_TIMEOUT_MS = 60_000; // Render 무료 플랜 콜드 스타트(최대 50초 안팎)를 견디도록 넉넉하게
 
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   const isGuest =
@@ -17,15 +20,27 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
     authHeader = session ? { Authorization: `Bearer ${session.access_token}` } : {};
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: { ...authHeader, ...(options?.headers as Record<string, string> | undefined) },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      signal: controller.signal,
+      ...options,
+      headers: { ...authHeader, ...(options?.headers as Record<string, string> | undefined) },
+    });
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    throw new ApiError(0, aborted ? "서버 응답이 너무 늦습니다. 잠시 후 다시 시도해 주세요." : "서버에 연결할 수 없습니다. 네트워크를 확인해 주세요.");
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (res.status === 401) {
     window.location.href = "/login";
-    throw new Error("Unauthorized");
+    throw new ApiError(401, "로그인이 필요합니다.");
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) throw await ApiError.fromResponse(res);
   return res.json();
 }
 

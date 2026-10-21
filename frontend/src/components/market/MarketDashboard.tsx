@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { api } from "@/lib/api";
-import { useSession } from "@/components/AuthProvider";
+import { useState } from "react";
+import { useMarketIndices, useInvestorTrend } from "@/lib/hooks";
+import ErrorNotice from "@/components/ui/ErrorNotice";
 import type { MarketIndices, MarketIndexItem, InvestorTrend } from "@/lib/types";
 
 function fmtNum(n: number): string {
@@ -96,33 +96,16 @@ const SECTIONS: {
 ];
 
 export default function MarketDashboard() {
-  const session = useSession();
-  const [indices, setIndices] = useState<MarketIndices | null>(null);
-  const [investor, setInvestor] = useState<InvestorTrend | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
+  const markFetched = () => setFetchedAt(new Date());
+  const idxQuery = useMarketIndices({ onSuccess: markFetched });
+  const invQuery = useInvestorTrend({ onSuccess: markFetched });
 
-  const fetchData = useCallback(async () => {
-    if (!session) return;
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const [idxRes, invRes] = await Promise.all([
-        api.getMarketIndices(),
-        api.getInvestorTrend(),
-      ]);
-      setIndices(idxRes.data ?? null);
-      setInvestor(invRes.data ?? null);
-      setFetchedAt(new Date());
-    } catch (err: unknown) {
-      setFetchError(err instanceof Error ? err.message : "데이터 조회 실패");
-    } finally {
-      setLoading(false);
-    }
-  }, [session]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const indices: MarketIndices | null = idxQuery.data?.data ?? null;
+  const investor: InvestorTrend | null = invQuery.data?.data ?? null;
+  const loading = idxQuery.isValidating || invQuery.isValidating;
+  const fetchError = idxQuery.error ?? invQuery.error;
+  const fetchData = () => Promise.all([idxQuery.mutate(), invQuery.mutate()]);
 
   return (
     <div className="space-y-5">
@@ -140,9 +123,7 @@ export default function MarketDashboard() {
         </button>
       </div>
 
-      {fetchError && (
-        <div className="text-sm text-red-500 bg-red-50 rounded-lg px-4 py-3">{fetchError}</div>
-      )}
+      {fetchError && <ErrorNotice error={fetchError} onRetry={fetchData} retrying={loading} />}
 
       {/* 지수 섹션 */}
       {indices

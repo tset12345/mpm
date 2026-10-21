@@ -3,7 +3,8 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { useSession } from "@/components/AuthProvider";
+import { useTreemap } from "@/lib/hooks";
+import { describeError } from "@/lib/errors";
 import { MarketStock, SparklinePoint } from "@/lib/types";
 
 type SortBy = "change_rate" | "frgn_net_buy" | "org_net_buy";
@@ -123,13 +124,13 @@ function Sparkline({ data, color }: { data: SparklinePoint[]; color: string }) {
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
 
 export default function TreemapHeatmap() {
-  const session = useSession();
   const router = useRouter();
-  const [stocks, setStocks] = useState<MarketStock[]>([]);
   const [sortBy, setSortBy] = useState<SortBy>("change_rate");
   const [viewMode, setViewMode] = useState<ViewMode>("sector");
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const query = useTreemap(sortBy);
+  const stocks = useMemo<MarketStock[]>(() => query.data?.data ?? [], [query.data]);
+  const loading = query.isLoading;
+  const fetchError = query.error && stocks.length === 0 ? describeError(query.error) : null;
   const [tooltip, setTooltip] = useState<{ x: number; y: number; stock: MarketStock } | null>(null);
   const [sparkline, setSparkline] = useState<SparklinePoint[]>([]);
   const [dims, setDims] = useState({ w: 1200, h: 580 });
@@ -149,21 +150,6 @@ export default function TreemapHeatmap() {
     obs.observe(containerRef.current);
     return () => obs.disconnect();
   }, []);
-
-  useEffect(() => {
-    if (!session) return; // 세션 없으면 대기
-    setLoading(true);
-    setFetchError(null);
-    api.getMarketTreemap(sortBy)
-      .then(res => {
-        setStocks(res.data || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        setFetchError(err.message || "데이터 조회 실패");
-        setLoading(false);
-      });
-  }, [sortBy, session]);
 
   // ── 레이아웃 계산 ──────────────────────────────────────────────────────────
 
@@ -219,8 +205,12 @@ export default function TreemapHeatmap() {
     setSparkline([]);
     if (tooltipDebounce.current) clearTimeout(tooltipDebounce.current);
     tooltipDebounce.current = setTimeout(async () => {
-      const res = await api.getSparkline(stock.stock_code, 5);
-      setSparkline(res.data || []);
+      try {
+        const res = await api.getSparkline(stock.stock_code, 5);
+        setSparkline(res.data || []);
+      } catch {
+        setSparkline([]); // 툴팁 보조 정보라서 실패해도 조용히 비워 둔다
+      }
     }, 300);
   }, []);
 
@@ -303,7 +293,7 @@ export default function TreemapHeatmap() {
         {fetchError ? (
           <div className="flex flex-col items-center justify-center h-96 gap-2">
             <div className="text-red-400 text-sm">{fetchError}</div>
-            <button onClick={() => { setFetchError(null); setLoading(true); api.getMarketTreemap(sortBy).then(r => { setStocks(r.data || []); setLoading(false); }).catch(e => { setFetchError(e.message); setLoading(false); }); }}
+            <button onClick={() => query.mutate()}
               className="text-xs text-blue-400 underline">재시도</button>
           </div>
         ) : loading ? (

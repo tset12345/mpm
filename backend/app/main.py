@@ -32,16 +32,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MPM API", version="2.0.0-dev", lifespan=lifespan, dependencies=[Depends(ip_rate_limit)])
 
+ALLOWED_ORIGINS = sorted({o.strip() for o in settings.allowed_origins.split(",") if o.strip()} | {
+    "http://localhost:3000",
+    "https://mpm-fe.vercel.app",
+})
+# 프론트가 Retry-After·X-Request-ID를 읽으려면 CORS에서 노출해야 한다
+EXPOSED_HEADERS = ["X-Request-ID", "Retry-After"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list({o.strip() for o in settings.allowed_origins.split(",") if o.strip()} | {
-        "http://localhost:3000",
-        "https://mpm-fe.vercel.app",
-    }),
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=EXPOSED_HEADERS,
 )
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -53,10 +59,18 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         )
     finally:
         request_id_var.reset(token)
+    headers = {"X-Request-ID": request_id}
+    # 이 핸들러는 CORS 미들웨어 바깥(ServerErrorMiddleware)에서 실행되므로 CORS 헤더를 직접 붙인다.
+    # 없으면 브라우저가 500 응답 자체를 막아 사용자에게 "연결 불가"로 보인다.
+    origin = request.headers.get("origin")
+    if origin in ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Expose-Headers"] = ", ".join(EXPOSED_HEADERS)
+        headers["Vary"] = "Origin"
     return JSONResponse(
         status_code=500,
         content={"detail": "서버 내부 오류가 발생했습니다.", "request_id": request_id},
-        headers={"X-Request-ID": request_id},
+        headers=headers,
     )
 
 

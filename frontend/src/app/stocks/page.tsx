@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { useRecommendationPrices } from "@/lib/hooks";
+import ErrorNotice from "@/components/ui/ErrorNotice";
 import { StockSummary, StockMaster, SectorLeaderStock } from "@/lib/types";
 import { useFavorites } from "@/hooks/useFavorites";
 import { RefreshCw, Search, Star, X, TrendingUp, ExternalLink } from "lucide-react";
@@ -129,6 +131,7 @@ export default function StocksPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [priceUpdatedAt, setPriceUpdatedAt] = useState<Date | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockMaster[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -136,7 +139,19 @@ export default function StocksPage() {
   const [extraFavoritesLoading, setExtraFavoritesLoading] = useState(false);
   const { favorites, toggle, isFavorite } = useFavorites();
   const router = useRouter();
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 30초마다 현재가·등락률 갱신 — 탭이 숨겨지면 멈추고, 같은 요청은 하나로 합쳐진다
+  const priceQuery = useRecommendationPrices(!loading && stocks.length > 0, {
+    onSuccess: () => setPriceUpdatedAt(new Date()),
+  });
+  const liveStocks = useMemo(() => {
+    const prices = new Map((priceQuery.data?.data ?? []).map((p) => [p.stock_code, p]));
+    return stocks.map((s) => {
+      const p = prices.get(s.stock_code);
+      return p
+        ? { ...s, current_price: p.current_price ?? s.current_price, change_rate: p.change_rate ?? s.change_rate }
+        : s;
+    });
+  }, [stocks, priceQuery.data]);
 
   const selectSector = (s: string) => {
     setSelectedSector(s);
@@ -171,29 +186,11 @@ export default function StocksPage() {
         setStocks(res.data ?? []);
         setDataDate(res.date ?? null);
         setGeneratedAt(res.generated_at ?? null);
-        refreshPrices();
+        setLoadError(null);
+        priceQuery.mutate();
       })
-      .catch(() => {})
+      .catch((err) => setLoadError(err))
       .finally(() => setRefreshing(false));
-  };
-
-  const refreshPrices = () => {
-    api.getRecommendationPrices().then((res) => {
-      if (!res.data?.length) return;
-      const map = Object.fromEntries(res.data.map((p) => [p.stock_code, p]));
-      setStocks((prev) =>
-        prev.map((s) =>
-          map[s.stock_code]
-            ? {
-                ...s,
-                current_price: map[s.stock_code].current_price ?? s.current_price,
-                change_rate:   map[s.stock_code].change_rate   ?? s.change_rate,
-              }
-            : s
-        )
-      );
-      setPriceUpdatedAt(new Date());
-    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -203,19 +200,11 @@ export default function StocksPage() {
         setStocks(res.data ?? []);
         setDataDate(res.date ?? null);
         setGeneratedAt(res.generated_at ?? null);
-        // 초기 로드 직후 실시간 가격 즉시 반영
-        refreshPrices();
+        setLoadError(null);
       })
-      .catch(() => setStocks([]))
+      .catch((err) => { setStocks([]); setLoadError(err); })
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 30초마다 현재가·등락률 자동 갱신
-  useEffect(() => {
-    if (loading) return;
-    pollRef.current = setInterval(refreshPrices, 30_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 추천 목록에 없는 즐겨찾기 종목 상세 조회
   useEffect(() => {
@@ -269,11 +258,11 @@ export default function StocksPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const favoriteStocks = stocks
+  const favoriteStocks = liveStocks
     .filter((s) => isFavorite(s.stock_code))
     .sort((a, b) => (b.total_score ?? b.tech_score ?? 0) - (a.total_score ?? a.tech_score ?? 0));
   const allFavorites = [...favoriteStocks, ...extraFavoriteData];
-  const displayed = tab === "recommend" ? stocks : allFavorites;
+  const displayed = tab === "recommend" ? liveStocks : allFavorites;
 
   const isSearchMode = searchQuery.trim().length > 0;
   const favoritesLoading = loading || extraFavoritesLoading;
@@ -731,10 +720,15 @@ export default function StocksPage() {
           ) : tab !== "favorites" && loading ? (
             <div className="text-center py-20 text-gray-400">불러오는 중...</div>
           ) : (
-            <StockTable
-              rows={displayed}
-              fromTab={tab === "favorites" ? "favorites" : undefined}
-            />
+            <>
+              {tab === "recommend" && loadError != null && (
+                <ErrorNotice error={loadError} onRetry={refreshRecommendations} retrying={refreshing} className="mb-3" />
+              )}
+              <StockTable
+                rows={displayed}
+                fromTab={tab === "favorites" ? "favorites" : undefined}
+              />
+            </>
           )}
         </>
       )}

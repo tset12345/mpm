@@ -945,6 +945,12 @@ const token = (await supabase.auth.getSession()).data.session?.access_token;
 headers: { Authorization: `Bearer ${token}` }
 ```
 
+**오류 처리 (`lib/errors.ts`)**: 모든 실패는 `ApiError`(`status`, `detail`, `retryAfter`, `requestId`)로 던져진다. 네트워크 단절·타임아웃(60초)은 `status 0`, 429는 `Retry-After`를 읽어 "N초 후 다시 시도" 문구를 만든다. `describeError(err)`가 어떤 예외든 한국어 문구로 바꾼다. 브라우저가 `Retry-After`·`X-Request-ID`를 읽으려면 서버가 CORS `expose_headers`로 노출해야 한다(백엔드 `main.py`).
+
+**SWR 훅 (`lib/hooks.ts`)**: 읽기 전용 조회는 `useMarketIndices`·`useInvestorTrend`·`useMarketRankings`·`useTreemap`·`useRecommendationPrices`를 쓴다. 같은 키 요청은 하나로 합쳐지고, 탭이 숨겨지면 폴링을 멈추며, 4xx는 재시도하지 않고 5xx는 지수 백오프(최대 3회), 429는 `Retry-After`만큼 기다린 뒤 재시도한다. 새 조회를 추가할 때는 `baseConfig`를 펼쳐 쓰고 `refreshInterval`은 서버 캐시 TTL과 맞춘다.
+
+**공용 UI**: `components/ui/ErrorNotice`(오류 문구 + "다시 시도"), `components/ui/Skeleton`(로딩 자리표시자).
+
 **API 함수 목록**
 
 | 함수 | HTTP | 엔드포인트 | 설명 |
@@ -1021,7 +1027,8 @@ headers: { Authorization: `Bearer ${token}` }
 | 규칙 | 적용 위치 | 설명 |
 |------|---------|------|
 | 로딩 텍스트 | 모든 페이지 | "불러오는 중..." (py-20 text-center text-gray-400) |
-| 실시간 갱신 | 종목 목록 | 30초 인터벌로 현재가/등락률 자동 갱신 |
+| 실시간 갱신 | 종목 목록 | SWR 30초 폴링으로 현재가/등락률 갱신 (탭이 숨겨지면 중단, 같은 요청은 병합) |
+| 조회 실패 안내 | 추천 목록·시장 현황 | `ErrorNotice`로 원인과 "다시 시도"를 표시. 기존 데이터가 있으면 유지한 채 안내만 띄움 |
 | Optimistic UI | 즐겨찾기 토글 | 상태 즉시 변경 후 API 비동기 호출 |
 | 버블링 방지 | 즐겨찾기 셀 | `e.stopPropagation()`으로 행 클릭(페이지 이동) 차단 |
 | URL 상태 동기화 | 종목 탭 | `?tab=` 쿼리 파라미터로 탭 상태 유지 |
