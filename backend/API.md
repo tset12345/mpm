@@ -53,6 +53,23 @@ Authorization: Bearer <supabase_access_token>
 
 **프록시 뒤에서의 IP 판별:** 기본값(`TRUSTED_PROXY_HOPS=0`)은 소켓 상대 IP를 씁니다. Render 같은 프록시 뒤에서는 모든 사용자가 같은 IP로 보여 한도를 공유할 수 있습니다. 배포 환경에서 `GET /api/v1/health/detail`의 `client`(peer, x_forwarded_for, resolved_ip)를 확인한 뒤, 앞단 프록시 수만큼 `TRUSTED_PROXY_HOPS`를 설정하세요. 값이 N이면 `X-Forwarded-For`의 **뒤에서 N번째** 값을 씁니다(앞쪽 값은 클라이언트가 위조할 수 있어 쓰지 않음). 인스턴스를 여러 개로 늘리면 한도가 인스턴스별로 따로 계산되므로 Redis 공유(E1)가 필요합니다.
 
+### 서버 캐시
+
+응답 지연과 KIS 호출을 줄이기 위해 아래 응답은 서버 메모리에 캐시됩니다. 같은 요청이 동시에 들어오면 한 번만 조회하고, 원본 조회가 실패하면 만료 후 일정 시간 동안 이전 값을 대신 돌려줍니다. 빈 결과는 캐시하지 않습니다.
+
+| 대상 | TTL | 장애 시 이전 값 허용 |
+|------|-----|--------------------|
+| 종목 현재가 (`recommend`, `holdings`, `virtual`, 상세 공용) | 10초 | 60초 |
+| 일봉 (`stocks/{code}/detail`, `analysis`, `sell-analysis` 공용) | 2분 | 15분 |
+| `GET /stocks/recommend` (DB 기반 목록, 현재가는 매번 덮어씀) | 1분 | 10분 |
+| `GET /market/indices` · `investor-trend` · `index-chart` | 1분 | 15분·10분·10분 |
+| `GET /market/rankings` | 2분 | 15분 |
+| `GET /market/treemap` | 3분 | 15분 |
+| `GET /market/adr` | 10분 | 1시간 |
+| `GET /market/sparkline/{code}` | 5분 | 1시간 |
+
+`POST /stocks/sync/recommendations`는 추천 캐시를 즉시 비웁니다. 인스턴스가 여러 개면 캐시가 인스턴스별로 따로 동작합니다.
+
 ### 공통 응답 구조
 
 성공 시:
