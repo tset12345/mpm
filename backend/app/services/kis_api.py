@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 import time
@@ -13,12 +14,38 @@ BASE_URL_REAL = "https://openapi.koreainvestment.com:9443"
 # 토큰을 파일에 캐싱 — uvicorn 재시작 시에도 유지
 _TOKEN_CACHE_FILE = Path(__file__).parent.parent.parent / ".kis_token_cache.json"
 
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3
+_BACKOFF_SEC = 0.4
+
+
+class _RateLimiter:
+    """초당 요청 수를 일정 간격으로 분산한다 (KIS 실전 20건/초, 모의 2건/초 제한 대비)."""
+
+    def __init__(self, rate: float):
+        self.interval = 1.0 / rate
+        self._next = 0.0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next)
+            self._next = start + self.interval
+        delay = start - now
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
 class KISApiClient:
     def __init__(self):
         self.base_url = BASE_URL_MOCK if settings.kis_is_mock else BASE_URL_REAL
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0
         self._http: httpx.AsyncClient | None = None  # 공유 클라이언트 — 매 호출마다 생성 금지
+        rate = settings.kis_max_rps or (2.0 if settings.kis_is_mock else 15.0)
+        self._limiter = _RateLimiter(rate)
+        self._slots = asyncio.Semaphore(settings.kis_max_concurrency)
         self._load_token_cache()
 
     def _get_http(self) -> httpx.AsyncClient:
@@ -75,29 +102,61 @@ class KISApiClient:
         self._save_token_cache()
         return self._access_token
 
-    async def get_stock_price(self, stock_code: str) -> dict:
-        token = await self._get_token()
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-            params={"fid_cond_mrkt_div_code": "J", "fid_input_iscd": stock_code},
-            headers={
+    async def _get(self, path: str, tr_id: str, params: dict, custtype: str | None = None) -> dict:
+        """모든 KIS 조회의 단일 진입점.
+
+        전역 속도·동시성 제한을 적용하고, 일시 오류(429/5xx/네트워크)는 재시도하며,
+        401이면 토큰을 새로 받아 한 번 더 시도한다.
+        """
+        refreshed = False
+        last_exc: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            token = await self._get_token()
+            headers = {
                 "authorization": f"Bearer {token}",
                 "appkey": settings.kis_app_key,
                 "appsecret": settings.kis_app_secret,
-                "tr_id": "FHKST01010100",
-            },
-            timeout=10.0,
+                "tr_id": tr_id,
+            }
+            if custtype:
+                headers["custtype"] = custtype
+            try:
+                async with self._slots:
+                    await self._limiter.acquire()
+                    resp = await self._get_http().get(
+                        f"{self.base_url}{path}", params=params, headers=headers, timeout=10.0,
+                    )
+            except httpx.TransportError as e:
+                last_exc = e
+                logger.warning("KIS 네트워크 오류 %s (%d/%d): %s", tr_id, attempt, _MAX_ATTEMPTS, e)
+            else:
+                if resp.status_code == 401 and not refreshed:
+                    refreshed = True
+                    self._access_token = None
+                    self._token_expires_at = 0.0
+                    logger.warning("KIS 401 — 토큰을 재발급해 재시도: %s", tr_id)
+                    continue
+                if resp.status_code in _RETRY_STATUS and attempt < _MAX_ATTEMPTS:
+                    last_exc = httpx.HTTPStatusError(
+                        f"HTTP {resp.status_code}", request=resp.request, response=resp)
+                    logger.warning("KIS HTTP %s %s (%d/%d)", resp.status_code, tr_id, attempt, _MAX_ATTEMPTS)
+                else:
+                    resp.raise_for_status()
+                    return resp.json()
+            if attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(_BACKOFF_SEC * attempt)
+        raise last_exc if last_exc else RuntimeError("KIS 요청 실패")
+
+    async def get_stock_price(self, stock_code: str) -> dict:
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-price", "FHKST01010100",
+            {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": stock_code},
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_daily_ohlcv(self, stock_code: str, start_date: str, end_date: str) -> dict:
-        token = await self._get_token()
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-            params={
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice", "FHKST03010100",
+            {
                 "fid_cond_mrkt_div_code": "J",
                 "fid_input_iscd": stock_code,
                 "fid_input_date_1": start_date,
@@ -105,41 +164,21 @@ class KISApiClient:
                 "fid_period_div_code": "D",
                 "fid_org_adj_prc": "0",
             },
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": "FHKST03010100",
-            },
-            timeout=10.0,
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_index_chart(self, market_code: str, start_date: str, end_date: str, period: str = "D") -> dict:
         """국내 지수 기간별 시세 (KOSPI: 0001, KOSDAQ: 1001), period: D/W/M"""
-        token = await self._get_token()
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-index-daily-price",
-            params={
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-index-daily-price", "FHKUP03500100",
+            {
                 "fid_cond_mrkt_div_code": "U",
                 "fid_input_iscd": market_code,
                 "fid_input_date_1": start_date,
                 "fid_input_date_2": end_date,
                 "fid_period_div_code": period,
             },
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": "FHKUP03500100",
-                "custtype": "P",
-            },
-            timeout=10.0,
+            custtype="P",
         )
-        resp.raise_for_status()
-        return resp.json()
 
     _RANK_PARAMS = {
         "fid_cond_mrkt_div_code": "J",
@@ -233,42 +272,17 @@ class KISApiClient:
         return await self._highlow_request(div_cls)
 
     async def _highlow_request(self, div_cls: str) -> dict:
-        token = await self._get_token()
-        params = {**self._NEAR_HIGH_PARAMS, "fid_div_cls_code": div_cls}
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/ranking/near-new-highlow",
-            params=params,
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": "FHPST01870000",
-                "custtype": "P",
-            },
-            timeout=10.0,
+        return await self._get(
+            "/uapi/domestic-stock/v1/ranking/near-new-highlow", "FHPST01870000",
+            {**self._NEAR_HIGH_PARAMS, "fid_div_cls_code": div_cls}, custtype="P",
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_vi_triggered_stocks(self) -> dict:
         """변동성완화장치(VI) 발동 종목 조회 (FHPST01390000). 장 중에만 데이터 발생."""
-        token = await self._get_token()
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-vi-status",
-            params=self._VI_PARAMS,
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": "FHPST01390000",
-                "custtype": "P",
-            },
-            timeout=10.0,
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-vi-status", "FHPST01390000",
+            self._VI_PARAMS, custtype="P",
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_institution_foreign_net_buy_ranking(self) -> dict:
         """기관·외국인 합산 순매수 상위 종목 (investor-trend용)"""
@@ -283,41 +297,16 @@ class KISApiClient:
         return await self._net_buy_request("2")
 
     async def _net_buy_request(self, etc_cls: str) -> dict:
-        token = await self._get_token()
-        params = {**self._NET_BUY_PARAMS, "fid_etc_cls_code": etc_cls}
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/foreign-institution-total",
-            params=params,
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": "FHPTJ04400000",
-                "custtype": "P",
-            },
-            timeout=10.0,
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/foreign-institution-total", "FHPTJ04400000",
+            {**self._NET_BUY_PARAMS, "fid_etc_cls_code": etc_cls}, custtype="P",
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def _rank_request(self, tr_id: str) -> dict:
-        token = await self._get_token()
-        client = self._get_http()
-        resp = await client.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/volume-rank",
-            params=self._RANK_PARAMS,
-            headers={
-                "authorization": f"Bearer {token}",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
-                "tr_id": tr_id,
-                "custtype": "P",
-            },
-            timeout=10.0,
+        return await self._get(
+            "/uapi/domestic-stock/v1/quotations/volume-rank", tr_id,
+            self._RANK_PARAMS, custtype="P",
         )
-        resp.raise_for_status()
-        return resp.json()
 
 
 kis_client = KISApiClient()

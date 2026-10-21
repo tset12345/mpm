@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     enable_telegram: bool = False    # 텔레그램 알림 (Local only, Render 배포 제외)
     ampm_api_key: str = ""           # AMPM 앱 전용 API 키 (X-AMPM-Key 헤더)
     guest_api_key: str = ""          # 웹 게스트 읽기 전용 키 (X-Guest-Key 헤더)
+    kis_max_rps: float = 0           # KIS 초당 요청 상한 (0=자동: 실전 15, 모의 2)
+    kis_max_concurrency: int = 8     # KIS 동시 요청 상한
 
     class Config:
         env_file = ".env"
