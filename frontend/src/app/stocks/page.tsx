@@ -267,7 +267,7 @@ export default function StocksPage() {
   const isSearchMode = searchQuery.trim().length > 0;
   const favoritesLoading = loading || extraFavoritesLoading;
 
-  function StockTable({ rows, fromTab }: { rows: StockSummary[]; fromTab?: string }) {
+  const renderStockTable = ({ rows, fromTab }: { rows: StockSummary[]; fromTab?: string }) => {
     return (
       <div className="border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -368,7 +368,7 @@ export default function StocksPage() {
   const RANK_ICON: Record<number, string> = { 1: "👑", 2: "🥈", 3: "🥉" };
   const RANK_LABEL: Record<number, string> = { 1: "1등주", 2: "2등주", 3: "3등주" };
 
-  function SectorLeaderTable({ leaders, onRowClick }: { leaders: SectorLeaderStock[]; onRowClick: (code: string) => void }) {
+  const renderSectorLeaderTable = ({ leaders, onRowClick }: { leaders: SectorLeaderStock[]; onRowClick: (code: string) => void }) => {
     return (
       <div className="border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -695,7 +695,7 @@ export default function StocksPage() {
                         )}
                       </div>
                       {leaders.length > 0
-                        ? <SectorLeaderTable leaders={leaders} onRowClick={(code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(sector)}`)} />
+                        ? renderSectorLeaderTable({ leaders, onRowClick: (code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(sector)}`) })
                         : <div className="text-xs text-gray-400 py-4 text-center border rounded-lg">캐시 없음 — 새로 불러오기를 눌러주세요</div>
                       }
                     </div>
@@ -703,7 +703,7 @@ export default function StocksPage() {
                 </div>
               )}
               {!sectorLoading && selectedSector !== "전체" && sectorLeaders.length > 0 && (
-                <SectorLeaderTable leaders={sectorLeaders} onRowClick={(code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(selectedSector ?? "")}`)} />
+                renderSectorLeaderTable({ leaders: sectorLeaders, onRowClick: (code) => router.push(`/stocks/${code}?from=sector&sector=${encodeURIComponent(selectedSector ?? "")}`) })
               )}
               {!sectorLoading && selectedSector !== "전체" && selectedSector && sectorLeaders.length === 0 && (
                 <div className="text-center py-12 text-gray-400 text-sm">캐시 없음 — 새로 불러오기를 눌러주세요</div>
@@ -724,10 +724,7 @@ export default function StocksPage() {
               {tab === "recommend" && loadError != null && (
                 <ErrorNotice error={loadError} onRetry={refreshRecommendations} retrying={refreshing} className="mb-3" />
               )}
-              <StockTable
-                rows={displayed}
-                fromTab={tab === "favorites" ? "favorites" : undefined}
-              />
+              {renderStockTable({ rows: displayed, fromTab: tab === "favorites" ? "favorites" : undefined })}
             </>
           )}
         </>

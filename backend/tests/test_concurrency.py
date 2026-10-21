@@ -269,3 +269,21 @@ def test_positions_fallback_uses_one_batch_query(monkeypatch):
     assert by_code[codes[5]] is None         # 시세가 전혀 없는 종목
     # 종목 6개: 최신 추천(1) + 가격(1) + 일괄 OHLCV(1) + 시세 없는 1종목 개별 확인(1) + 포지션(1)
     assert reads.count("stock_ohlcv") == 2
+
+
+def test_many_polling_clients_cost_one_kis_call_per_code(rec_env):
+    _, calls = rec_env
+
+    async def go():
+        return await asyncio.gather(*[stocks.get_recommendation_prices() for _ in range(50)])
+
+    results = run(go())
+    assert all(len(r["data"]) == 2 for r in results)
+    assert calls["price"] == 2  # 50명이 동시에 폴링해도 종목 수(2)만큼만 KIS 호출 (이전: 50 x 2 = 100)
+
+
+def test_rapid_second_poll_within_ttl_makes_no_kis_calls(rec_env):
+    _, calls = rec_env
+    run(stocks.get_recommendation_prices())
+    run(stocks.get_recommendation_prices())
+    assert calls["price"] == 2
