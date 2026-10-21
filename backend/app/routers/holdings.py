@@ -5,11 +5,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.threads import run_blocking
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
 from app.services.supabase_client import supabase
 from app.services.kis_api import kis_client
+from app.services.market_data import get_price_data, get_ohlcv_data
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ async def _fetch_current_prices(
 
     async def _fetch_one(code: str) -> None:
         try:
-            data = await kis_client.get_stock_price(code)
+            data = await get_price_data(code)
             out = data.get("output", {})
             cp = out.get("stck_prpr")
             cr = out.get("prdy_ctrt")
@@ -119,12 +121,14 @@ def _enrich(holding: dict, prices: dict[str, dict], price_times: dict[str, str] 
 
 @router.get("")
 async def list_holdings(profile_id: Optional[int] = Query(None)):
-    try:
+    def _load() -> list[dict]:
         q = supabase.table("holdings").select("*").order("created_at")
         if profile_id is not None:
             q = q.eq("profile_id", profile_id)
-        result = q.execute()
-        rows: list[dict] = result.data or []
+        return q.execute().data or []
+
+    try:
+        rows = await run_blocking(_load)
     except Exception as e:
         raise internal_error("보유 종목 조회에 실패했습니다.")
 
@@ -137,7 +141,9 @@ async def list_holdings(profile_id: Optional[int] = Query(None)):
     # stock_master에서 KOSPI/KOSDAQ 시장 구분 조회
     market_map: dict[str, str] = {}
     try:
-        mrows = supabase.table("stock_master").select("stock_code,market").in_("stock_code", codes).execute()
+        mrows = await run_blocking(
+            lambda: supabase.table("stock_master").select("stock_code,market").in_("stock_code", codes).execute()
+        )
         market_map = {r["stock_code"]: r["market"] for r in (mrows.data or [])}
     except Exception:
         logger.warning("list_holdings: 예외 무시하고 계속 진행", exc_info=True)
@@ -152,7 +158,7 @@ async def list_holdings(profile_id: Optional[int] = Query(None)):
 
 
 @router.post("")
-async def create_holding(body: HoldingCreate):
+def create_holding(body: HoldingCreate):
     code = body.stock_code.strip()
     if not code:
         raise HTTPException(status_code=400, detail="종목 코드를 입력해 주세요.")
@@ -174,7 +180,7 @@ async def create_holding(body: HoldingCreate):
 
 
 @router.put("/{holding_id}")
-async def update_holding(holding_id: int, body: HoldingUpdate):
+def update_holding(holding_id: int, body: HoldingUpdate):
     _holding_or_404(holding_id)
     updates: dict = {}
     if body.avg_price is not None:
@@ -206,7 +212,7 @@ async def get_sell_analysis(holding_id: int):
     from app.services.sell_signal import analyze_sell
     from datetime import date, timedelta
 
-    holding = _holding_or_404(holding_id)
+    holding = await run_blocking(_holding_or_404, holding_id)
 
     stock_code = holding["stock_code"]
     avg_price   = holding["avg_price"]
@@ -219,8 +225,8 @@ async def get_sell_analysis(holding_id: int):
 
     try:
         price_data, ohlcv_data = await asyncio.gather(
-            kis_client.get_stock_price(stock_code),
-            kis_client.get_daily_ohlcv(stock_code, start, end),
+            get_price_data(stock_code),
+            get_ohlcv_data(stock_code, start, end),
         )
     except Exception as e:
         raise internal_error("시세 조회에 실패했습니다.")
@@ -243,7 +249,9 @@ async def get_sell_analysis(holding_id: int):
     # 3. 포트폴리오 비중 계산 (전체 보유 평가금액 대비)
     portfolio_weight: float | None = None
     try:
-        all_rows = supabase.table("holdings").select("stock_code,avg_price,quantity").execute()
+        all_rows = await run_blocking(
+            lambda: supabase.table("holdings").select("stock_code,avg_price,quantity").execute()
+        )
         codes = list({r["stock_code"] for r in (all_rows.data or [])})
         prices, _ = await _fetch_current_prices(codes)
 
@@ -275,7 +283,7 @@ async def get_sell_analysis(holding_id: int):
 
 
 @router.delete("/{holding_id}")
-async def delete_holding(holding_id: int):
+def delete_holding(holding_id: int):
     _holding_or_404(holding_id)
     try:
         supabase.table("holdings").delete().eq("id", holding_id).execute()

@@ -16,6 +16,7 @@ from app.core.errors import internal_error
 
 from app.core.auth import verify_token
 from app.services.kis_api import kis_client
+from app.services.market_data import get_price_data, get_ohlcv_data
 from app.services.dart_client import collect_dart_data, extract_key_financials
 from app.services.sector_per import get_sector_per
 from app.services.analysis.base import StrategyValidationError
@@ -86,8 +87,8 @@ async def run_analysis(
     # ── 1. KIS API: 현재가 + OHLCV 병렬 조회 ─────────────────────────────────
     try:
         price_data, ohlcv_data = await asyncio.gather(
-            kis_client.get_stock_price(stock_code),
-            kis_client.get_daily_ohlcv(stock_code, start_date, end_date),
+            get_price_data(stock_code),
+            get_ohlcv_data(stock_code, start_date, end_date),
         )
     except Exception as e:
         raise internal_error("분석에 실패했습니다.")

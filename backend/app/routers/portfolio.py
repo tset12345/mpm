@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.threads import run_blocking
 from pydantic import BaseModel
 
 from app.core.auth import verify_token
@@ -52,11 +53,13 @@ def _upsert(profile_id: Optional[int], text: str, holdings_hash: str):
 
 
 async def _load_enriched_holdings(profile_id: Optional[int]) -> list[dict]:
-    q = supabase.table("holdings").select("*").order("created_at")
-    if profile_id is not None:
-        q = q.eq("profile_id", profile_id)
-    result = q.execute()
-    rows: list[dict] = result.data or []
+    def _load() -> list[dict]:
+        q = supabase.table("holdings").select("*").order("created_at")
+        if profile_id is not None:
+            q = q.eq("profile_id", profile_id)
+        return q.execute().data or []
+
+    rows = await run_blocking(_load)
     if not rows:
         return []
     codes = list({r["stock_code"] for r in rows})
@@ -65,7 +68,7 @@ async def _load_enriched_holdings(profile_id: Optional[int]) -> list[dict]:
 
 
 @router.get("/analysis")
-async def get_analysis(
+def get_analysis(
     profile_id: Optional[int] = Query(None),
     holdings_hash: Optional[str] = Query(None),
 ):
@@ -95,7 +98,7 @@ async def create_analysis(body: AnalysisRequest):
     h_hash = compute_holdings_hash(holdings)
 
     # 오늘 날짜 + 동일 해시면 캐시 재사용
-    cached = _get_cached(body.profile_id)
+    cached = await run_blocking(_get_cached, body.profile_id)
     if cached and not is_stale(cached, h_hash):
         return {
             "status": "success",
@@ -111,7 +114,9 @@ async def create_analysis(body: AnalysisRequest):
     analysis_type = "quant"
     if body.profile_id is not None:
         try:
-            p = supabase.table("profiles").select("name,analysis_type").eq("id", body.profile_id).limit(1).execute()
+            p = await run_blocking(
+                lambda: supabase.table("profiles").select("name,analysis_type").eq("id", body.profile_id).limit(1).execute()
+            )
             if p.data:
                 profile_name = p.data[0]["name"]
                 analysis_type = p.data[0].get("analysis_type") or "quant"
@@ -125,7 +130,7 @@ async def create_analysis(body: AnalysisRequest):
         raise internal_error("AI 분석에 실패했습니다.")
 
     try:
-        _upsert(body.profile_id, text, h_hash)
+        await run_blocking(_upsert, body.profile_id, text, h_hash)
     except Exception as e:
         logger.warning(f"분석 결과 저장 실패: {e}")
 

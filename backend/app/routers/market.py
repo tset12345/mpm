@@ -13,18 +13,25 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import verify_token
 from app.services.kis_api import kis_client
+from app.services.market_data import get_price_data, get_ohlcv_data
 from app.services.sector_leader import SECTOR_STOCKS
 from app.services.supabase_client import supabase
 from app.services.db_utils import fetch_all
+from app.services.cache import AsyncTTLCache
+from app.core.threads import run_blocking
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"], dependencies=[Depends(verify_token)])
 
-# ── 트리맵 캐시 ──────────────────────────────────────────────────────────────
-_TREEMAP_DATA: list[dict] = []
-_TREEMAP_AT: float = 0.0
-_TREEMAP_TTL = 180  # 3분
+# ── 응답 캐시 (TTL + 동시 요청 병합 + 장애 시 만료 값 대체) ───────────────────
+_treemap_cache = AsyncTTLCache(ttl=180, stale_ttl=900, max_size=4)
+_rankings_cache = AsyncTTLCache(ttl=120, stale_ttl=900, max_size=4)
+_indices_cache = AsyncTTLCache(ttl=60, stale_ttl=900, max_size=4)
+_index_chart_cache = AsyncTTLCache(ttl=60, stale_ttl=600, max_size=16)
+_investor_cache = AsyncTTLCache(ttl=60, stale_ttl=600, max_size=4)
+_adr_cache = AsyncTTLCache(ttl=600, stale_ttl=3600, max_size=16)
+_sparkline_cache = AsyncTTLCache(ttl=300, stale_ttl=3600, max_size=256)
 
 _KIS_SEM = asyncio.Semaphore(5)
 
@@ -96,7 +103,7 @@ def _load_treemap_from_db(code_sector: dict[str, str]) -> list[dict]:
 async def _fetch_stock(code: str, sector: str) -> dict | None:
     async with _KIS_SEM:
         try:
-            data = await kis_client.get_stock_price(code)
+            data = await get_price_data(code)
             out = data.get("output", {})
             return {
                 "stock_code": code,
@@ -117,12 +124,16 @@ async def _fetch_stock(code: str, sector: str) -> dict | None:
 
 @router.get("/treemap")
 async def get_treemap(sort: str = Query("change_rate")):
-    """SECTOR_STOCKS 유니버스 전체 종목 데이터 (3분 캐시)"""
-    global _TREEMAP_DATA, _TREEMAP_AT
+    """SECTOR_STOCKS 유니버스 전체 종목 데이터 (3분 캐시, 동시 요청은 1회 조회로 병합)"""
+    try:
+        data = await _treemap_cache.get_or_load("treemap", _build_treemap, should_cache=bool)
+    except Exception as e:
+        logger.warning(f"[market/treemap] 조회 실패, 빈 결과 반환: {e}")
+        data = []
+    return _sorted_treemap(data, sort)
 
-    if time.time() - _TREEMAP_AT < _TREEMAP_TTL and _TREEMAP_DATA:
-        return _sorted_treemap(_TREEMAP_DATA, sort)
 
+async def _build_treemap() -> list[dict]:
     # 중복 없이 code→sector 매핑
     code_sector: dict[str, str] = {}
     for sector, codes in SECTOR_STOCKS.items():
@@ -139,7 +150,9 @@ async def get_treemap(sort: str = Query("change_rate")):
     # KIS inquire-price 전면 장애 시 DB fallback
     if not data:
         logger.warning("[market/treemap] KIS 전면 실패 → stock_ohlcv DB fallback 사용")
-        data = _load_treemap_from_db(code_sector)
+        data = await run_blocking(_load_treemap_from_db, code_sector)
+        if not data:
+            raise RuntimeError("트리맵: KIS와 DB fallback 모두 데이터 없음")
 
     # 기관/외국인 순매수 보강 (ranking API)
     try:
@@ -163,7 +176,9 @@ async def get_treemap(sort: str = Query("change_rate")):
     # stock_master에서 한글 종목명 보강
     try:
         codes = [item["stock_code"] for item in data]
-        master_rows = supabase.table("stock_master").select("stock_code,stock_name").in_("stock_code", codes).execute()
+        master_rows = await run_blocking(
+            lambda: supabase.table("stock_master").select("stock_code,stock_name").in_("stock_code", codes).execute()
+        )
         name_map = {r["stock_code"]: r["stock_name"] for r in (master_rows.data or [])}
         for item in data:
             if item["stock_code"] in name_map:
@@ -171,9 +186,7 @@ async def get_treemap(sort: str = Query("change_rate")):
     except Exception as e:
         logger.warning(f"[market/treemap] stock_master 종목명 보강 실패: {e}")
 
-    _TREEMAP_DATA = data
-    _TREEMAP_AT = time.time()
-    return _sorted_treemap(data, sort)
+    return data
 
 
 def _sorted_treemap(data: list[dict], sort: str) -> dict:
@@ -194,16 +207,16 @@ async def get_index_chart(
 ):
     """KOSPI/KOSDAQ 지수 기간별 시세"""
     market_code = "0001" if market == "KOSPI" else "1001"
-    today = date.today()
-    days_map = {"D": 180, "W": 365, "M": 365 * 3}
-    start = (today - timedelta(days=days_map.get(period, 180))).strftime("%Y%m%d")
-    end = today.strftime("%Y%m%d")
 
-    try:
+    async def _load() -> list[dict]:
+        today = date.today()
+        days_map = {"D": 180, "W": 365, "M": 365 * 3}
+        start = (today - timedelta(days=days_map.get(period, 180))).strftime("%Y%m%d")
+        end = today.strftime("%Y%m%d")
         raw = await kis_client.get_index_chart(market_code, start, end, period)
         # output2 → 리스트 (날짜 역순이므로 reverse)
         items = list(reversed(raw.get("output2", [])))
-        candles = [
+        return [
             {
                 "date": _fmt_date(it.get("stck_bsop_date") or it.get("bass_dt") or ""),
                 "open": _sf(it.get("bstp_nmix_oprc")),
@@ -216,6 +229,9 @@ async def get_index_chart(
             for it in items
             if it.get("bstp_nmix_prpr")
         ]
+
+    try:
+        candles = await _index_chart_cache.get_or_load((market_code, period), _load, should_cache=bool)
         return {"status": "success", "market": market, "period": period, "data": candles}
     except Exception as e:
         logger.warning(f"[market/index-chart] 조회 실패: {e}")
@@ -226,8 +242,8 @@ async def get_index_chart(
 
 @router.get("/investor-trend")
 async def get_investor_trend():
-    """기관·외국인 순매수 상위 종목 집계 (ranking API 기반)"""
-    try:
+    """기관·외국인 순매수 상위 종목 집계 (ranking API 기반, 1분 캐시)"""
+    async def _load() -> dict:
         rank = await kis_client.get_institution_foreign_net_buy_ranking()
         items = rank.get("output", [])[:50]
         total_frgn = sum(_sf(r.get("frgn_ntby_qty")) for r in items)
@@ -243,14 +259,15 @@ async def get_investor_trend():
             for r in items
         ]
         return {
-            "status": "success",
-            "data": {
-                "foreign_net_buy": total_frgn,
-                "institution_net_buy": total_org,
-                "individual_net_buy": -(total_frgn + total_org),
-                "stocks": stocks,
-            },
+            "foreign_net_buy": total_frgn,
+            "institution_net_buy": total_org,
+            "individual_net_buy": -(total_frgn + total_org),
+            "stocks": stocks,
         }
+
+    try:
+        data = await _investor_cache.get_or_load("investor", _load, should_cache=lambda d: bool(d["stocks"]))
+        return {"status": "success", "data": data}
     except Exception as e:
         logger.warning(f"[market/investor-trend] 조회 실패: {e}")
         return {"status": "error", "data": None}
@@ -259,59 +276,59 @@ async def get_investor_trend():
 # ── ADR ───────────────────────────────────────────────────────────────────────
 
 @router.get("/adr")
-def get_adr(days: int = Query(60, ge=1, le=365)):
-    """등락비율(ADR) — stock_ohlcv DB에서 계산"""
+async def get_adr(days: int = Query(60, ge=1, le=365)):
+    """등락비율(ADR) — stock_ohlcv DB에서 계산 (10분 캐시, 계산은 스레드풀)"""
     try:
-        start_iso = (date.today() - timedelta(days=days + 10)).isoformat()
-        rows = fetch_all(lambda: (
-            supabase.table("stock_ohlcv")
-            .select("stock_code,trade_date,close_price")
-            .gte("trade_date", start_iso)
-            .order("trade_date")
-            .order("stock_code")
-        ))
-
-        # stock_code → [(date, close), ...]
-        by_stock: dict[str, list[tuple[str, float]]] = defaultdict(list)
-        for r in rows:
-            by_stock[r["stock_code"]].append((r["trade_date"], float(r["close_price"])))
-
-        all_dates = sorted({r["trade_date"] for r in rows})
-        adr_series: list[dict] = []
-
-        for i, d in enumerate(all_dates[1:], 1):
-            prev_d = all_dates[i - 1]
-            advancing = declining = 0
-            for closes in by_stock.values():
-                closes_map = {c[0]: c[1] for c in closes}
-                cur = closes_map.get(d)
-                prv = closes_map.get(prev_d)
-                if cur is not None and prv is not None:
-                    if cur > prv:
-                        advancing += 1
-                    elif cur < prv:
-                        declining += 1
-            total = advancing + declining
-            if total > 0:
-                adr_series.append({
-                    "date": d,
-                    "advancing": advancing,
-                    "declining": declining,
-                    "adr": round(advancing / total * 100, 1),
-                })
-
-        return {"status": "success", "data": adr_series[-days:]}
+        data = await _adr_cache.get_or_load(days, lambda: run_blocking(_compute_adr, days), should_cache=bool)
+        return {"status": "success", "data": data}
     except Exception as e:
         logger.warning(f"[market/adr] 계산 실패: {e}")
         return {"status": "success", "data": []}
 
 
+def _compute_adr(days: int) -> list[dict]:
+    start_iso = (date.today() - timedelta(days=days + 10)).isoformat()
+    rows = fetch_all(lambda: (
+        supabase.table("stock_ohlcv")
+        .select("stock_code,trade_date,close_price")
+        .gte("trade_date", start_iso)
+        .order("trade_date")
+        .order("stock_code")
+    ))
+
+    # stock_code → [(date, close), ...]
+    by_stock: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for r in rows:
+        by_stock[r["stock_code"]].append((r["trade_date"], float(r["close_price"])))
+
+    all_dates = sorted({r["trade_date"] for r in rows})
+    adr_series: list[dict] = []
+
+    close_maps = [dict(closes) for closes in by_stock.values()]
+    for i, d in enumerate(all_dates[1:], 1):
+        prev_d = all_dates[i - 1]
+        advancing = declining = 0
+        for closes_map in close_maps:
+            cur = closes_map.get(d)
+            prv = closes_map.get(prev_d)
+            if cur is not None and prv is not None:
+                if cur > prv:
+                    advancing += 1
+                elif cur < prv:
+                    declining += 1
+        total = advancing + declining
+        if total > 0:
+            adr_series.append({
+                "date": d,
+                "advancing": advancing,
+                "declining": declining,
+                "adr": round(advancing / total * 100, 1),
+            })
+
+    return adr_series[-days:]
+
+
 # ── 시장 랭킹 ────────────────────────────────────────────────────────────────
-
-_RANKINGS_DATA: dict = {}
-_RANKINGS_AT: float = 0.0
-_RANKINGS_TTL = 120  # 2분 캐시
-
 
 def _parse_vol_item(r: dict) -> dict:
     return {
@@ -348,58 +365,50 @@ def _parse_highlow_item(r: dict) -> dict:
 @router.get("/rankings")
 async def get_market_rankings(limit: int = Query(5, le=20)):
     """상승률/하락률/거래량/거래대금/외인/기관 순매수/52주신고가/신저가 상위 N (2분 캐시)"""
-    global _RANKINGS_DATA, _RANKINGS_AT
-
-    if time.time() - _RANKINGS_AT < _RANKINGS_TTL and _RANKINGS_DATA:
-        data = _RANKINGS_DATA
-        return {"status": "success", "data": {k: v[:limit] for k, v in data.items()}}
-
     try:
-        vol_raw, amt_raw, frgn_raw, inst_raw, high52_raw, low52_raw = await asyncio.gather(
-            kis_client.get_volume_ranking(),
-            kis_client.get_trading_amount_ranking(),
-            kis_client.get_foreign_net_buy_ranking(),       # fid_etc_cls_code=1
-            kis_client.get_institution_net_buy_ranking(),   # fid_etc_cls_code=2
-            kis_client.get_52week_high_low("1"),            # 신고가
-            kis_client.get_52week_high_low("2"),            # 신저가
-            return_exceptions=True,
+        data = await _rankings_cache.get_or_load(
+            "rankings", _build_rankings, should_cache=lambda d: any(d.values()),
         )
-
-        def _out(raw) -> list:
-            return raw.get("output", []) if isinstance(raw, dict) else []
-
-        vol_items  = [_parse_vol_item(r)             for r in _out(vol_raw)]
-        amt_items  = [_parse_vol_item(r)             for r in _out(amt_raw)]
-        frgn_items = [_parse_net_item(r, "frgn_ntby_qty") for r in _out(frgn_raw)]
-        inst_items = [_parse_net_item(r, "orgn_ntby_qty") for r in _out(inst_raw)]
-        high52_items = [_parse_highlow_item(r) for r in _out(high52_raw) if r.get("stck_prpr")]
-        low52_items  = [_parse_highlow_item(r) for r in _out(low52_raw)  if r.get("stck_prpr")]
-
-        _RANKINGS_DATA = {
-            "rise":             sorted(vol_items, key=lambda x: x["change_rate"], reverse=True),
-            "fall":             sorted(vol_items, key=lambda x: x["change_rate"]),
-            "volume":           vol_items,
-            "amount":           sorted(amt_items, key=lambda x: x["amount"], reverse=True),
-            "foreign_buy":      sorted(frgn_items, key=lambda x: x["net_buy"], reverse=True),
-            "institution_buy":  sorted(inst_items, key=lambda x: x["net_buy"], reverse=True),
-            "high_52w":         high52_items,
-            "low_52w":          low52_items,
-        }
-        _RANKINGS_AT = time.time()
     except Exception as e:
         logger.warning(f"[market/rankings] 랭킹 조회 실패: {e}")
-        if not _RANKINGS_DATA:
-            return {"status": "error", "data": {}}
-
-    data = _RANKINGS_DATA
+        return {"status": "error", "data": {}}
     return {"status": "success", "data": {k: v[:limit] for k, v in data.items()}}
 
 
-# ── 주요 시장 지표 (KOSPI·KOSDAQ·NASDAQ·USD/KRW) ──────────────────────────────
+async def _build_rankings() -> dict:
+    vol_raw, amt_raw, frgn_raw, inst_raw, high52_raw, low52_raw = await asyncio.gather(
+        kis_client.get_volume_ranking(),
+        kis_client.get_trading_amount_ranking(),
+        kis_client.get_foreign_net_buy_ranking(),       # fid_etc_cls_code=1
+        kis_client.get_institution_net_buy_ranking(),   # fid_etc_cls_code=2
+        kis_client.get_52week_high_low("1"),            # 신고가
+        kis_client.get_52week_high_low("2"),            # 신저가
+        return_exceptions=True,
+    )
 
-_INDICES_DATA: dict = {}
-_INDICES_AT: float = 0.0
-_INDICES_TTL = 60  # 1분 캐시
+    def _out(raw) -> list:
+        return raw.get("output", []) if isinstance(raw, dict) else []
+
+    vol_items  = [_parse_vol_item(r)             for r in _out(vol_raw)]
+    amt_items  = [_parse_vol_item(r)             for r in _out(amt_raw)]
+    frgn_items = [_parse_net_item(r, "frgn_ntby_qty") for r in _out(frgn_raw)]
+    inst_items = [_parse_net_item(r, "orgn_ntby_qty") for r in _out(inst_raw)]
+    high52_items = [_parse_highlow_item(r) for r in _out(high52_raw) if r.get("stck_prpr")]
+    low52_items  = [_parse_highlow_item(r) for r in _out(low52_raw)  if r.get("stck_prpr")]
+
+    return {
+        "rise":             sorted(vol_items, key=lambda x: x["change_rate"], reverse=True),
+        "fall":             sorted(vol_items, key=lambda x: x["change_rate"]),
+        "volume":           vol_items,
+        "amount":           sorted(amt_items, key=lambda x: x["amount"], reverse=True),
+        "foreign_buy":      sorted(frgn_items, key=lambda x: x["net_buy"], reverse=True),
+        "institution_buy":  sorted(inst_items, key=lambda x: x["net_buy"], reverse=True),
+        "high_52w":         high52_items,
+        "low_52w":          low52_items,
+    }
+
+
+# ── 주요 시장 지표 (KOSPI·KOSDAQ·NASDAQ·USD/KRW) ──────────────────────────────
 
 # Yahoo Finance 공유 클라이언트 — 매 호출 시 신규 생성 방지 (SSL context 누적 방지)
 _YAHOO_CLIENT: httpx.AsyncClient | None = None
@@ -418,11 +427,14 @@ def _get_yahoo_client() -> httpx.AsyncClient:
 @router.get("/indices")
 async def get_market_indices():
     """KOSPI, KOSDAQ, NASDAQ, USD/KRW 현재 지표 (1분 캐시)"""
-    global _INDICES_DATA, _INDICES_AT
+    data = await _indices_cache.get_or_load(
+        "indices", _build_indices,
+        should_cache=lambda d: any(v.get("price") is not None for v in d.values()),
+    )
+    return {"status": "success", "data": data}
 
-    if time.time() - _INDICES_AT < _INDICES_TTL and _INDICES_DATA:
-        return {"status": "success", "data": _INDICES_DATA}
 
+async def _build_indices() -> dict:
     today_str = date.today().strftime("%Y%m%d")
     week_ago = (date.today() - timedelta(days=7)).strftime("%Y%m%d")
 
@@ -476,36 +488,37 @@ async def get_market_indices():
         _fetch_yahoo("^TNX", "미국 10년물"),
     )
 
-    _INDICES_DATA = {
+    return {
         "kospi": kospi, "kosdaq": kosdaq,
         "nasdaq": nasdaq, "dow": dow, "sp500": sp500,
         "usd_krw": usd_krw, "crude_oil": crude_oil, "us10y": us10y,
     }
-    _INDICES_AT = time.time()
-    return {"status": "success", "data": _INDICES_DATA}
 
 
 # ── 스파크라인 ────────────────────────────────────────────────────────────────
 
 @router.get("/sparkline/{code}")
-def get_sparkline(code: str, days: int = Query(5)):
-    """종목 스파크라인 — stock_ohlcv DB에서 최근 N일 종가 반환"""
+async def get_sparkline(code: str, days: int = Query(5, ge=1, le=60)):
+    """종목 스파크라인 — stock_ohlcv DB에서 최근 N일 종가 반환 (5분 캐시)"""
     try:
-        start_iso = (date.today() - timedelta(days=days + 5)).isoformat()
-        rows = (
-            supabase.table("stock_ohlcv")
-            .select("trade_date,close_price")
-            .eq("stock_code", code)
-            .gte("trade_date", start_iso)
-            .order("trade_date", desc=True)
-            .limit(days)
-            .execute()
-        ).data or []
-        rows = list(reversed(rows))
-        return {
-            "status": "success",
-            "data": [{"date": r["trade_date"], "close": float(r["close_price"])} for r in rows],
-        }
+        data = await _sparkline_cache.get_or_load(
+            (code, days), lambda: run_blocking(_load_sparkline, code, days), should_cache=bool,
+        )
+        return {"status": "success", "data": data}
     except Exception as e:
         logger.warning(f"[market/sparkline] 조회 실패 {code}: {e}")
         return {"status": "success", "data": []}
+
+
+def _load_sparkline(code: str, days: int) -> list[dict]:
+    start_iso = (date.today() - timedelta(days=days + 5)).isoformat()
+    rows = (
+        supabase.table("stock_ohlcv")
+        .select("trade_date,close_price")
+        .eq("stock_code", code)
+        .gte("trade_date", start_iso)
+        .order("trade_date", desc=True)
+        .limit(days)
+        .execute()
+    ).data or []
+    return [{"date": r["trade_date"], "close": float(r["close_price"])} for r in reversed(rows)]

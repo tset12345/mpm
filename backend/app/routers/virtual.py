@@ -16,13 +16,13 @@ router = APIRouter(prefix="/api/v1/virtual", tags=["virtual"], dependencies=[Dep
 
 async def _fetch_realtime_prices(codes: list[str]) -> dict[str, int]:
     """보유 포지션 종목의 KIS 실시간가를 병렬 조회한다. 실패 종목은 결과에서 제외."""
-    from app.services.kis_api import kis_client
+    from app.services.market_data import get_price_data
     sem = asyncio.Semaphore(5)
 
     async def _fetch(code: str) -> tuple[str, int | None]:
         async with sem:
             try:
-                data = await kis_client.get_stock_price(code)
+                data = await get_price_data(code)
                 raw = data.get("output", {}).get("stck_prpr", "0")
                 price = int(float(str(raw).replace(",", "") or "0"))
                 return code, price if price > 0 else None

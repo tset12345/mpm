@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, timedelta
 
 import pytest
@@ -67,7 +68,8 @@ def test_adr_uses_all_dates_beyond_cap(monkeypatch):
     codes = [f"{i:06d}" for i in range(30)]  # 40일 x 30종목 = 1,200행 > 1,000
     seed_ohlcv(db, codes, days, start=start)
     monkeypatch.setattr(market, "supabase", db)
-    out = market.get_adr(days=60)
+    market._adr_cache.invalidate()
+    out = asyncio.run(market.get_adr(days=60))
     dates = [p["date"] for p in out["data"]]
     assert out["status"] == "success"
     assert len(dates) == days - 1

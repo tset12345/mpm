@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.core.auth import verify_token
 from app.models.schemas import StockSummary, StockDetail, StockMetrics, IchimokuData
 from app.services.kis_api import kis_client
+from app.services.market_data import get_price_data, get_ohlcv_data
 from app.services.supabase_client import supabase
 from app.services.db_utils import fetch_all
 from app.services import technical
@@ -191,7 +192,7 @@ async def get_recommendations():
             async def _fetch_price(code: str) -> tuple[str, int | None, float | None]:
                 async with sem:
                     try:
-                        out = (await kis_client.get_stock_price(code)).get("output", {})
+                        out = (await get_price_data(code)).get("output", {})
                         cp = out.get("stck_prpr")
                         cr = out.get("prdy_ctrt")
                         return (code,
@@ -234,7 +235,7 @@ async def get_recommendation_prices():
 
         async def _fetch(code: str) -> dict:
             try:
-                out = (await kis_client.get_stock_price(code)).get("output", {})
+                out = (await get_price_data(code)).get("output", {})
                 cp = out.get("stck_prpr")
                 cr = out.get("prdy_ctrt")
                 return {
@@ -339,8 +340,8 @@ async def get_stock_detail(stock_code: str):
 
     try:
         price_data, ohlcv_data = await asyncio.gather(
-            kis_client.get_stock_price(stock_code),
-            kis_client.get_daily_ohlcv(stock_code, start, end),
+            get_price_data(stock_code),
+            get_ohlcv_data(stock_code, start, end),
         )
         fetched_at = datetime.now(timezone.utc).astimezone(
             timezone(timedelta(hours=9))
