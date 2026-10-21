@@ -27,6 +27,22 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pytest -q --cov=app --cov-report=term
 
+  audit:
+    # 알려진 취약점 점검 — 보류 중인 메이저 업그레이드(Starlette·Next) 때문에 실패해도 CI를 막지 않는다
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pip-audit==2.9.0
+      - run: pip-audit -r backend/requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm audit --omit=dev --prefix frontend
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

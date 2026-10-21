@@ -79,6 +79,36 @@ SlowAPI 미들웨어로 IP 기준 **120 req/min** 제한이 적용됩니다. 초
 |----------|------|
 | 200 | 서버 정상 동작 |
 
+### GET /api/v1/health/detail
+
+DB 응답, 데이터 최신성, 스케줄러, 메모리를 한 번에 확인합니다. **인증 필요** (Bearer 토큰 또는 읽기 키).
+
+**응답 예시**
+
+```json
+{
+  "status": "ok",
+  "version": "2.0.0-dev",
+  "uptime_sec": 3600,
+  "rss_mb": 212,
+  "checks": { "db": { "ok": true, "latency_ms": 85 } },
+  "data_freshness": { "recommendations_date": "2026-10-21", "ohlcv_date": "2026-10-21" },
+  "scheduler": { "enabled": true, "running": true, "jobs": 7 }
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `status` | `ok` 또는 `degraded`(DB 점검 실패) |
+| `rss_mb` | 프로세스 상주 메모리. Linux가 아니면 `null` |
+| `data_freshness` | 추천·시세 데이터의 가장 최근 날짜. 오래되면 동기화 중단을 의심 |
+
+### 공통 오류 응답
+
+- 모든 응답에 `X-Request-ID` 헤더가 붙습니다. 요청에 같은 헤더를 보내면 그 값을 그대로 쓰고, 없으면 서버가 12자리 ID를 만듭니다. 로그의 `[request_id]`와 대응되므로 장애 문의 시 이 값을 전달하세요.
+- 500 응답의 `detail`은 고정 문구입니다(내부 예외 메시지를 노출하지 않음). 원인은 서버 로그에 스택트레이스와 함께 남습니다.
+- 처리되지 않은 예외는 `{"detail": "서버 내부 오류가 발생했습니다.", "request_id": "..."}` 형식으로 응답합니다.
+
 ---
 
 ## 종목 (Stocks)

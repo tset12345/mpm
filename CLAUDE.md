@@ -93,6 +93,8 @@ mpm/
 - **백엔드**: `http://localhost:8000`  
 - **프론트엔드**: `http://localhost:3000` (포트 3000 고정, 3001 = ARA 프로젝트 전용)
 - **Swagger**: `http://localhost:8000/docs`
+- **백엔드 테스트**: `cd backend && .venv/bin/python -m pytest -q` (DB·외부 API 불필요, 약 0.5초)
+- **프론트 타입체크**: `cd frontend && npx tsc --noEmit`
 
 ### 중요: check.sh 포트 규칙
 

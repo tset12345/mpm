@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logging_config import setup_logging
 from app.core.request_context import request_id_var
-from app.routers import stocks, holdings, profiles, portfolio, analysis, virtual, market
+from app.routers import stocks, holdings, profiles, portfolio, analysis, virtual, market, system
 from app.services.scheduler import start_scheduler, scheduler
 
 setup_logging()
@@ -96,6 +96,7 @@ app.include_router(portfolio.router)
 app.include_router(analysis.router)
 app.include_router(virtual.router)
 app.include_router(market.router)
+app.include_router(system.router)
 
 
 @app.api_route("/api/v1/health", methods=["GET", "HEAD"])

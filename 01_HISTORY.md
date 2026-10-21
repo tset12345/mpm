@@ -64,6 +64,16 @@
 
 ---
 
+### Phase 7 — v2.0.0 고도화 1단계: 품질 기반 (2026-10)
+
+v1.0.0(`4103060`) 태그 이후 `release/v2.0.0` 브랜치에서 진행. 계획·진행 상태는 `ENHANCEMENT_V2.md`.
+
+- **테스트·CI (A1):** 백엔드 단위 테스트 119개(기술 분석·매도 신호·일목균형표·기대수익률·인증·가상거래·페이지네이션·에러 처리). 가상거래는 메모리 가짜 Supabase로 DB 없이 검증. GitHub Actions에서 pytest + 프론트 `tsc` + 의존성 감사 실행
+- **로깅·에러 (A2):** 요청 ID 컨텍스트 로깅, `LOG_FORMAT=json` 지원, 표준 500 응답. 라우터 25곳이 `str(e)`로 내부 예외 메시지를 응답에 노출하던 것을 고정 문구로 교체하고 원인은 로그로 이동. 로그 없이 예외를 삼키던 20곳에 로깅 추가
+- **데이터 정확성 (A3):** Supabase(PostgREST)가 한 요청에 1,000행까지만 돌려주는데 `stock_ohlcv` 다종목 조회 6곳이 이를 고려하지 않았다. 실측으로 최근 70일 5,131행 중 1,000행만 반환되어 `/market/adr`이 오래된 5일치로만 계산됨을 확인. `fetch_all()` 페이지네이션으로 수정(ADR 4개 → 44개 지점). 추천 알고리즘·섹터 주도주의 OHLCV 캐시 조회도 같은 원인으로 최근 데이터가 빠졌을 가능성이 있어 함께 수정
+- **인덱스 (A3):** `025_query_indexes.sql` 추가 (Dashboard 수동 적용 필요)
+- **모니터링·보안 (G2):** 인증 필요 `/api/v1/health/detail`(DB·데이터 최신성·스케줄러·메모리). PyJWT 2.13.0→2.15.0(인증 경로 취약점 14건), Next 14.2.3→14.2.35
+
 ## 알고리즘 성능 현황 (2026-06-25 기준)
 
 `extract_loss_trades.py` 실행 결과:
@@ -99,3 +109,6 @@
 | Phase 5 | ES256 JWKS 검증 채택 | Supabase 기본 알고리즘, algorithm confusion 방지 |
 | Phase 5 | X-AMPM-Key 읽기 전용 제한 | AMPM 앱은 조회만 필요, 쓰기 노출 최소화 |
 | Phase 6 | httpx 싱글턴 도입 | per-request SSL context 누적 → OOM 방지 |
+| Phase 7 | 다종목 시세 조회를 `fetch_all()` 페이지네이션으로 통일 | PostgREST 1,000행 상한으로 조용히 잘림. 정렬 키가 유일해야 페이지 경계 누락이 없음 |
+| Phase 7 | 500 응답 `detail`을 고정 문구로 변경 | 내부 예외 메시지(DB 오류 등) 노출 방지. 프론트는 `detail`을 쓰지 않아 영향 없음 |
+| Phase 7 | Starlette 1.x·Next 16.x 메이저 업그레이드는 보류 | FastAPI 0.118이 Starlette <0.49로 고정, Next는 App Router 전반 영향. 별도 항목으로 분리 |

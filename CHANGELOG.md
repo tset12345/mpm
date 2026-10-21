@@ -4,8 +4,16 @@
 
 ## [Unreleased] — v2.0.0 (브랜치 `release/v2.0.0`)
 
-- 고도화 분석·계획 문서 `ENHANCEMENT_V2.md` 추가
-- 버전 표기를 `2.0.0-dev`로 변경 (FastAPI, frontend/package.json)
+### 2.0.0-alpha.1 — 1단계: 품질 기반 (2026-10-21)
+
+- 추가: 백엔드 단위 테스트 119개, GitHub Actions CI(pytest·tsc·의존성 감사)
+- 추가: 요청 ID(`X-Request-ID`) 로깅, `LOG_LEVEL`/`LOG_FORMAT=json`, 표준 500 응답
+- 추가: 인증 필요 `GET /api/v1/health/detail` (DB·데이터 최신성·스케줄러·메모리)
+- 추가: `supabase/migrations/025_query_indexes.sql` (Dashboard 수동 적용 필요)
+- 수정: Supabase 1,000행 상한으로 시세 조회가 잘리던 문제(`/market/adr`, 추천·섹터 주도주 OHLCV 캐시 등 6곳)
+- 수정: 500 응답이 내부 예외 메시지를 노출하던 25곳을 고정 문구로 교체, 삼켜진 예외 20곳에 로깅
+- 보안: PyJWT 2.13.0→2.15.0, Next 14.2.3→14.2.35. Starlette·Next 메이저 업그레이드는 보류
+- 문서: `ENHANCEMENT_V2.md`, `CHANGELOG.md` 추가, 버전 표기 `2.0.0-dev`
 
 ## [1.0.0] — 2026-09-03 (태그 `v1.0.0`, 커밋 `4103060`)
 

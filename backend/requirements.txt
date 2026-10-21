@@ -11,5 +11,5 @@ python-dotenv==1.2.2
 APScheduler==3.10.4
 beautifulsoup4==4.12.3
 pandas==3.0.3
-PyJWT==2.13.0
+PyJWT==2.15.0
 slowapi==0.1.9

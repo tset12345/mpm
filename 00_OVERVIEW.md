@@ -114,6 +114,9 @@ cp backend/.env.example backend/.env
 | `ALLOWED_ORIGINS` | CORS 허용 출처 (쉼표 구분) | 기본값: `http://localhost:3000` |
 | `ALLOWED_USER_EMAIL` | 허용할 사용자 이메일 (단일 화이트리스트) | — |
 | `AMPM_API_KEY` | AMPM Android 앱 전용 읽기 키 (X-AMPM-Key 헤더) | — |
+| `GUEST_API_KEY` | 웹 게스트 읽기 전용 키 (X-Guest-Key 헤더) | — |
+| `LOG_LEVEL` | 로그 레벨 | 기본값: `INFO` |
+| `LOG_FORMAT` | 로그 형식 `text` \| `json` (Render 등 로그 수집 시 `json` 권장) | 기본값: `text` |
 | `ENABLE_SCHEDULER` | 일일 동기화 스케줄러 | 기본값: `false` |
 | `ENABLE_INTRADAY` | 장중 10분 매매 트리거 (로컬 전용) | 기본값: `false` |
 | `ENABLE_TELEGRAM` | 텔레그램 알림 (로컬 전용, Render 미설정) | 기본값: `false` |
