@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.algorithms import ECAlgorithm
 
 from app.core.config import settings
+from app.core.ratelimit import enforce_identity_limit
 
 # auto_error=False: Bearer 없어도 자동 401 안 함 (AMPM 키 먼저 확인)
 _security = HTTPBearer(auto_error=False)
@@ -39,6 +40,16 @@ def _get_public_key(kid: str):
 def verify_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Security(_security),
+) -> dict:
+    """인증 후 호출자별 분당 한도를 적용한다. 인증 실패는 IP 한도(app 전역)로 방어한다."""
+    payload = _authenticate(request, credentials)
+    enforce_identity_limit(request, payload)
+    return payload
+
+
+def _authenticate(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials],
 ) -> dict:
     # ── AMPM 앱 전용 API 키 (읽기 전용) ──────────────────────────
     ampm_key = request.headers.get("X-AMPM-Key", "")

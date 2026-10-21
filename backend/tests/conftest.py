@@ -33,3 +33,14 @@ def make_records(closes, highs=None, lows=None, volumes=None, opens=None):
         }
         for c, h, l, o, v in zip(closes, highs, lows, opens, volumes)
     ]
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    from app.core.ratelimit import limiter
+    limiter.clear()
+    yield
+    limiter.clear()

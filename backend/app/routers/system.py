@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.core.auth import verify_token
 from app.core.config import settings
+from app.core.ratelimit import client_ip
 from app.services.scheduler import scheduler
 from app.services.supabase_client import supabase
 
@@ -64,6 +65,12 @@ def health_detail(request: Request):
         "rss_mb": _rss_mb(),
         "checks": checks,
         "data_freshness": freshness,
+        "client": {
+            "peer": request.client.host if request.client else None,
+            "x_forwarded_for": request.headers.get("x-forwarded-for"),
+            "resolved_ip": client_ip(request),
+            "trusted_proxy_hops": settings.trusted_proxy_hops,
+        },
         "scheduler": {
             "enabled": settings.enable_scheduler or settings.enable_intraday,
             "running": scheduler.running,

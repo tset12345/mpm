@@ -115,6 +115,13 @@ cp backend/.env.example backend/.env
 | `ALLOWED_USER_EMAIL` | 허용할 사용자 이메일 (단일 화이트리스트) | — |
 | `AMPM_API_KEY` | AMPM Android 앱 전용 읽기 키 (X-AMPM-Key 헤더) | — |
 | `GUEST_API_KEY` | 웹 게스트 읽기 전용 키 (X-Guest-Key 헤더) | — |
+| `RATE_LIMIT_IP_PER_MIN` | IP당 분당 전체 요청 한도 (헬스체크 제외) | 기본값: `300` |
+| `RATE_LIMIT_USER_PER_MIN` | 로그인 사용자·AMPM 키당 분당 한도 | 기본값: `600` |
+| `RATE_LIMIT_GUEST_PER_MIN` | 게스트(IP별) 분당 한도 | 기본값: `120` |
+| `RATE_LIMIT_EXPENSIVE_PER_MIN` | 수동 동기화·강제 갱신 등 비용이 큰 작업 분당 한도 | 기본값: `6` |
+| `TRUSTED_PROXY_HOPS` | 앞단 프록시 수 (0=소켓 IP, N=`X-Forwarded-For` 뒤에서 N번째) | 기본값: `0` |
+| `KIS_MAX_RPS` | KIS 초당 요청 상한 (0=자동: 실전 15, 모의 2) | 기본값: `0` |
+| `KIS_MAX_CONCURRENCY` | KIS 동시 요청 상한 | 기본값: `8` |
 | `LOG_LEVEL` | 로그 레벨 | 기본값: `INFO` |
 | `LOG_FORMAT` | 로그 형식 `text` \| `json` (Render 등 로그 수집 시 `json` 권장) | 기본값: `text` |
 | `ENABLE_SCHEDULER` | 일일 동기화 스케줄러 | 기본값: `false` |

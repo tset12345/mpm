@@ -2,15 +2,12 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logging_config import setup_logging
+from app.core.ratelimit import ip_rate_limit
 from app.core.request_context import request_id_var
 from app.routers import stocks, holdings, profiles, portfolio, analysis, virtual, market, system
 from app.services.scheduler import start_scheduler, scheduler
@@ -33,16 +30,7 @@ async def lifespan(app: FastAPI):
         await _YAHOO_CLIENT.aclose()
 
 
-app = FastAPI(title="MPM API", version="2.0.0-dev", lifespan=lifespan)
-
-limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
-
-
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+app = FastAPI(title="MPM API", version="2.0.0-dev", lifespan=lifespan, dependencies=[Depends(ip_rate_limit)])
 
 app.add_middleware(
     CORSMiddleware,

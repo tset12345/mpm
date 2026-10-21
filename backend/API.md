@@ -36,11 +36,22 @@ Authorization: Bearer <supabase_access_token>
 
 ## Rate Limiting
 
-SlowAPI 미들웨어로 IP 기준 **120 req/min** 제한이 적용됩니다. 초과 시 `429 Too Many Requests` 반환.
+프로세스 메모리 슬라이딩 윈도(60초) 방식으로 세 단계 제한이 적용됩니다. 초과 시 `429 Too Many Requests`와 `Retry-After` 헤더(초)를 반환합니다.
+
+| 단계 | 기준 | 기본 한도 | 환경변수 |
+|------|------|----------|----------|
+| IP 전역 | 요청자 IP (헬스체크 제외) | 300/분 | `RATE_LIMIT_IP_PER_MIN` |
+| 사용자 | 로그인 사용자 `sub`, AMPM 키 | 600/분 | `RATE_LIMIT_USER_PER_MIN` |
+| 게스트 | 게스트 키 + IP (키는 공유하므로 IP별로 계산) | 120/분 | `RATE_LIMIT_GUEST_PER_MIN` |
+| 비용이 큰 작업 | 사용자·작업별 | 6/분 (AI 분석 10/분) | `RATE_LIMIT_EXPENSIVE_PER_MIN` |
+
+비용이 큰 작업: `POST /stocks/sync/*`, `POST /stocks/sector-leader/refresh`, `GET /stocks/sector-leader?force=true`, `POST /portfolio/analysis`.
 
 ```json
-{ "detail": "Too many requests" }
+{ "detail": "요청이 너무 많습니다. 12초 후 다시 시도하세요." }
 ```
+
+**프록시 뒤에서의 IP 판별:** 기본값(`TRUSTED_PROXY_HOPS=0`)은 소켓 상대 IP를 씁니다. Render 같은 프록시 뒤에서는 모든 사용자가 같은 IP로 보여 한도를 공유할 수 있습니다. 배포 환경에서 `GET /api/v1/health/detail`의 `client`(peer, x_forwarded_for, resolved_ip)를 확인한 뒤, 앞단 프록시 수만큼 `TRUSTED_PROXY_HOPS`를 설정하세요. 값이 N이면 `X-Forwarded-For`의 **뒤에서 N번째** 값을 씁니다(앞쪽 값은 클라이언트가 위조할 수 있어 쓰지 않음). 인스턴스를 여러 개로 늘리면 한도가 인스턴스별로 따로 계산되므로 Redis 공유(E1)가 필요합니다.
 
 ### 공통 응답 구조
 

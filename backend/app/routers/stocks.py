@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.ratelimit import expensive_rate_limit
 from app.core.threads import run_blocking
 from pydantic import BaseModel
 
@@ -279,7 +280,7 @@ def get_recommendation_history(type: str = Query("daily", pattern="^(daily|weekl
         raise internal_error("추천 이력 조회에 실패했습니다.")
 
 
-@router.post("/sync/recommendations")
+@router.post("/sync/recommendations", dependencies=[Depends(expensive_rate_limit("sync"))])
 async def sync_recommendations():
     """추천 종목 수동 업데이트 (히스토리 저장 포함)"""
     try:
@@ -295,7 +296,7 @@ async def sync_recommendations():
         raise internal_error("추천 동기화에 실패했습니다.")
 
 
-@router.post("/sync/ohlcv")
+@router.post("/sync/ohlcv", dependencies=[Depends(expensive_rate_limit("sync"))])
 async def sync_ohlcv_endpoint(body: OHLCVSyncRequest = OHLCVSyncRequest()):
     """OHLCV 데이터 수동 동기화. body.stock_codes 미제공 시 거래량 상위 50종목 자동 조회."""
     try:
@@ -323,7 +324,7 @@ def search_stocks(q: str = Query(..., min_length=1)):
         return {"status": "success", "data": []}
 
 
-@router.post("/sync/master")
+@router.post("/sync/master", dependencies=[Depends(expensive_rate_limit("sync"))])
 async def sync_stock_master():
     """KRX에서 KOSPI·KOSDAQ 전체 종목 목록을 동기화."""
     try:
@@ -514,14 +515,15 @@ async def get_all_sector_leaders():
     return {"status": "success", "data": data}
 
 
-@router.post("/sector-leader/refresh")
+@router.post("/sector-leader/refresh", dependencies=[Depends(expensive_rate_limit("sync"))])
 async def refresh_sector_leaders():
     """모든 섹터를 KIS API에서 재조회해 DB에 저장 (스케줄러 또는 수동 갱신)."""
     await refresh_all_sectors()
     return {"status": "success", "message": f"{len(SECTOR_STOCKS)}개 섹터 갱신 완료"}
 
 
-@router.get("/sector-leader")
+@router.get("/sector-leader", dependencies=[Depends(expensive_rate_limit(
+    "sector-force", when=lambda r: r.query_params.get("force", "").lower() == "true"))])
 async def get_sector_leader(sector: str = Query(...), force: bool = Query(False)):
     if sector not in SECTOR_STOCKS:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 섹터입니다: {sector}")

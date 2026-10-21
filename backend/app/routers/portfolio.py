@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.errors import internal_error
+from app.core.ratelimit import expensive_rate_limit
 from app.core.threads import run_blocking
 from pydantic import BaseModel
 
@@ -88,7 +89,7 @@ def get_analysis(
     }
 
 
-@router.post("/analysis")
+@router.post("/analysis", dependencies=[Depends(expensive_rate_limit("ai", per_minute=10))])
 async def create_analysis(body: AnalysisRequest):
     """보유 종목을 조회해 Gemini 분석 실행 후 결과를 저장하고 반환."""
     holdings = await _load_enriched_holdings(body.profile_id)
