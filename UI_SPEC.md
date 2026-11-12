@@ -3,7 +3,7 @@
 > My Portfolio Manager — AI 기반 한국 주식 분석 및 포트폴리오 관리
 >
 > 작성 기준: 2026-06-04
-> 기술 스택: Next.js 14 (App Router) + TypeScript + Tailwind CSS + lucide-react
+> 기술 스택: Next.js 15 (App Router) + TypeScript + Tailwind CSS + lucide-react
 
 ---
 

@@ -38,7 +38,7 @@
 
 | 구분 | 기술 |
 |------|------|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| Frontend | Next.js 15 (App Router), TypeScript, Tailwind CSS |
 | Backend | FastAPI (Python 3.11), APScheduler |
 | Database | Supabase (PostgreSQL) |
 | AI | Google Gemini 2.5 Flash Lite |
@@ -57,7 +57,7 @@ KIS Open API ──▶ FastAPI (백엔드)
                          ↓
                     Supabase (PostgreSQL)
                          ↓
-                    Next.js 14 (프론트엔드)
+                    Next.js 15 (프론트엔드)
                     ├── 대시보드 (차트·위젯)
                     ├── 종목 추천 및 섹터 주도주
                     └── 포트폴리오·가상거래 현황

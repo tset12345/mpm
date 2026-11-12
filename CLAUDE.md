@@ -19,7 +19,7 @@ KIS API로 실시간 시세·수급을 수집하고, 듀얼 엔진 기술 분석
 
 | 레이어 | 기술 |
 |--------|------|
-| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS |
+| Frontend | Next.js 15 (App Router) + TypeScript + Tailwind CSS |
 | Backend | FastAPI (Python 3.11) + uvicorn |
 | Database | Supabase (PostgreSQL) |
 | AI | Google Gemini 2.5 Flash Lite |

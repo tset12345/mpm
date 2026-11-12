@@ -4,6 +4,12 @@
 
 ## [Unreleased] — v2.0.0 (브랜치 `release/v2.0.0`)
 
+### 보안 패치 — Next 메이저 업그레이드 (2026-11-12, 미배포)
+
+- 보안: Next 14.2.35→15.5.29, React 18→19, lucide-react 0.379→1.72. Next 14 계열에 남아 있던 critical(Image Optimization API RCE 등) 해소. 남은 high는 Next 내부 고정 postcss 1건(빌드 시 CSS 처리용)
+- 변경: `/stocks/[code]`가 `params` prop 대신 `useParams()` 사용 (Next 15에서 `params`가 Promise로 바뀜)
+- 검증: `tsc --noEmit`, `next build`, vitest 25개 통과. 브라우저 동작 확인은 아직
+
 ### 2.0.0-alpha.2 — 2단계: 단일 인스턴스 최적화 (2026-10-21)
 
 - 성능: KIS 호출 단일 진입점 + 전역 속도·동시성 제한 + 재시도(`KIS_MAX_RPS`, `KIS_MAX_CONCURRENCY`)

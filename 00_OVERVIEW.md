@@ -22,7 +22,7 @@ AI 기반 한국 주식 포트폴리오 관리 시스템. 실시간 KIS API 데�
 
 | 구분 | 기술 | 용도 |
 |------|------|------|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS | 웹 UI |
+| Frontend | Next.js 15 (App Router), TypeScript, Tailwind CSS | 웹 UI |
 | Backend | FastAPI (Python 3.11), APScheduler | REST API, 스케줄러 |
 | Database | Supabase (PostgreSQL) | 데이터 저장·캐싱 |
 | AI | Google Gemini 2.5 Flash Lite | 포트폴리오 분석 |

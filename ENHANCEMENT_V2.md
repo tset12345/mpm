@@ -133,6 +133,7 @@
 - **PyJWT 2.13.0 취약점 14건(확인):** 인증 경로(`jwt.decode`, JWK 파싱)에 영향. 2.15.0으로 해결.
 - **Starlette 0.47.2 취약점 6건(확인):** 수정이 0.49.1(Range 헤더 DoS) 또는 1.x에 있다. FastAPI 0.118.3이 Starlette <0.49로 묶어 두므로 FastAPI 상향이 선행되어야 한다. 이 앱은 `FileResponse`·`StaticFiles`를 쓰지 않아 실제 노출은 제한적이다(추정).
 - **Next 14.2.35에도 critical 1건 남음(확인):** 수정은 16.x(메이저). Server Actions·Image Optimizer 사용 여부를 확인한 뒤 F1 단계에서 판단한다.
+  - **2026-11-12 해소:** 16.x 대신 15.5.29(+React 19)로 올려 critical 0건. next/image·Server Actions는 쓰지 않는다.
 
 ### 후속 후보 (아직 작업하지 않음)
 

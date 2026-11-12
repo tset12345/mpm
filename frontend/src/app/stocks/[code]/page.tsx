@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { StockDetail, ExpectedReturn, StrategyAnalysisData } from "@/lib/types";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -437,8 +437,9 @@ const STRENGTH_STYLE: Record<string, string> = {
   "약함":     "bg-gray-100 text-gray-500",
 };
 
-export default function StockDetailPage({ params }: { params: { code: string } }) {
-  const { code } = params;
+export default function StockDetailPage() {
+  // Next 15: params가 Promise로 바뀌어 클라이언트 컴포넌트에서는 useParams로 읽는다
+  const { code } = useParams<{ code: string }>();
   const searchParams = useSearchParams();
   const from = searchParams.get("from");
   const fromSector = searchParams.get("sector");
