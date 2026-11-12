@@ -112,7 +112,7 @@ reboot_be() {
         return 1
     fi
 
-    (cd "$BACKEND_DIR" && nohup caffeinate -si "$uvicorn" app.main:app --host 0.0.0.0 --port 8000 \
+    (cd "$BACKEND_DIR" && nohup caffeinate -si "$uvicorn" app.main:app --host 127.0.0.1 --port 8000 \
         > /tmp/mpm_backend.log 2>&1 &)
     info "백엔드 시작 중 (caffeinate -si 슬립 방지)..."
 
@@ -132,7 +132,7 @@ reboot_fe() {
     hdr "[Frontend 재시작]"
     # 포트 3000 프로세스 종료 (3001=ARA 포트는 건드리지 않음)
     local pid
-    pid=$(lsof -ti :3000 2>/dev/null) || true
+    pid=$(lsof -ti :3000 -sTCP:LISTEN 2>/dev/null) || true
     if [ -n "$pid" ]; then
         kill $pid 2>/dev/null && info "기존 프로세스 종료 (PID $pid)"
         sleep 1
@@ -140,7 +140,7 @@ reboot_fe() {
     # 3002·3003 에 남은 MPM 고아 Next.js 프로세스 정리
     for orphan_port in 3002 3003; do
         local opid
-        opid=$(lsof -ti :"$orphan_port" 2>/dev/null) || true
+        opid=$(lsof -ti :"$orphan_port" -sTCP:LISTEN 2>/dev/null) || true
         [ -z "$opid" ] && continue
         ps -p "$opid" -o command= 2>/dev/null | grep -q "next" || continue
         kill "$opid" 2>/dev/null && info "포트 $orphan_port 고아 프로세스 종료 (PID $opid)"
@@ -177,7 +177,7 @@ close_be() {
 close_fe() {
     hdr "[Frontend 종료]"
     local pids
-    pids=$(lsof -ti :3000 -ti :3002 -ti :3003 2>/dev/null) || true
+    pids=$(lsof -ti :3000 -ti :3002 -ti :3003 -sTCP:LISTEN 2>/dev/null) || true
     if [ -n "$pids" ]; then
         echo "$pids" | xargs kill 2>/dev/null && ok "프론트엔드 종료 완료 (PID $pids)"
     else

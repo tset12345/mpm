@@ -123,7 +123,7 @@ run_backend() {
     pip install -q -r requirements.txt
 
     info "FastAPI 서버 시작 → http://localhost:8000"
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 &
     BACKEND_PID=$!
     success "백엔드 실행 중 (PID $BACKEND_PID)"
 
