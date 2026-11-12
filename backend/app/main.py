@@ -30,7 +30,20 @@ async def lifespan(app: FastAPI):
         await _YAHOO_CLIENT.aclose()
 
 
-app = FastAPI(title="MPM API", version="2.0.0-dev", lifespan=lifespan, dependencies=[Depends(ip_rate_limit)])
+def docs_urls(enabled: bool) -> dict:
+    """API 문서 경로. 꺼져 있으면 /docs·/redoc·/openapi.json 모두 404가 된다."""
+    if enabled:
+        return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+app = FastAPI(
+    title="MPM API",
+    version="2.0.0-dev",
+    lifespan=lifespan,
+    dependencies=[Depends(ip_rate_limit)],
+    **docs_urls(settings.api_docs_enabled),
+)
 
 ALLOWED_ORIGINS = sorted({o.strip() for o in settings.allowed_origins.split(",") if o.strip()} | {
     "http://localhost:3000",

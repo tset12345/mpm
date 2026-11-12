@@ -88,3 +88,15 @@ def test_guest_key_is_read_only():
     assert client.post(PROTECTED, headers=h, json={}).status_code == 403
     assert client.delete(f"{PROTECTED}/1", headers=h).status_code == 403
     assert client.get(PROTECTED, headers={"X-Guest-Key": "wrong"}).status_code == 401
+
+
+def test_api_docs_closed_by_default():
+    # conftest는 API_DOCS_ENABLED를 설정하지 않으므로 운영과 같은 기본값(닫힘)이다
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_docs_urls_switch():
+    from app.main import docs_urls
+    assert docs_urls(True) == {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+    assert docs_urls(False) == {"docs_url": None, "redoc_url": None, "openapi_url": None}

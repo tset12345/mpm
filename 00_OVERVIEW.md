@@ -78,7 +78,7 @@ cp backend/.env.example backend/.env
 실행 후:
 - 백엔드 API: http://localhost:8000
 - 프론트엔드: http://localhost:3000
-- API 문서 (Swagger): http://localhost:8000/docs
+- API 문서 (Swagger): http://localhost:8000/docs (`backend/.env`에 `API_DOCS_ENABLED=true`일 때만. 운영은 비공개)
 
 ### dev.sh / check.sh 명령어
 
@@ -122,6 +122,7 @@ cp backend/.env.example backend/.env
 | `RATE_LIMIT_USER_PER_MIN` | 로그인 사용자·AMPM 키당 분당 한도 | 기본값: `600` |
 | `RATE_LIMIT_GUEST_PER_MIN` | 게스트(IP별) 분당 한도 | 기본값: `120` |
 | `RATE_LIMIT_EXPENSIVE_PER_MIN` | 수동 동기화·강제 갱신 등 비용이 큰 작업 분당 한도 | 기본값: `6` |
+| `API_DOCS_ENABLED` | `/docs`·`/redoc`·`/openapi.json` 공개 여부. 운영은 설정하지 않음(닫힘) | 기본값: `false` (로컬만 `true`) |
 | `TRUSTED_PROXY_HOPS` | 앞단 프록시 수 (0=소켓 IP, N=`X-Forwarded-For` 뒤에서 N번째) | 기본값: `0` |
 | `KIS_MAX_RPS` | KIS 초당 요청 상한 (0=자동: 실전 15, 모의 2) | 기본값: `0` |
 | `KIS_MAX_CONCURRENCY` | KIS 동시 요청 상한 | 기본값: `8` |

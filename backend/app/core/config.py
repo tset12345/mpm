@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     rate_limit_user_per_min: int = 600     # 인증된 사용자(본인·AMPM 키)당
     rate_limit_guest_per_min: int = 120    # 게스트(IP별)
     rate_limit_expensive_per_min: int = 6  # 수동 동기화·AI 분석 등 비용이 큰 작업
+    api_docs_enabled: bool = False         # /docs·/redoc·/openapi.json 공개 여부 (운영은 꺼 둔다, 로컬 .env에서만 켠다)
     trusted_proxy_hops: int = 0            # 앞단 프록시 수 (0=소켓 IP 사용, N=X-Forwarded-For 뒤에서 N번째)
     kis_max_rps: float = 0           # KIS 초당 요청 상한 (0=자동: 실전 15, 모의 2)
     kis_max_concurrency: int = 8     # KIS 동시 요청 상한

@@ -8,7 +8,7 @@
 | API 버전 접두어 | `/api/v1` |
 | 응답 형식 | `application/json` |
 | 인증 | Supabase JWT Bearer 토큰 필수 (`Authorization: Bearer <token>`) |
-| Swagger UI | http://localhost:8000/docs |
+| Swagger UI | http://localhost:8000/docs (로컬 전용: `backend/.env`에 `API_DOCS_ENABLED=true`. 운영은 꺼져 있어 404) |
 | ReDoc | http://localhost:8000/redoc |
 
 ## 인증 (Authentication)
