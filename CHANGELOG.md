@@ -4,6 +4,10 @@
 
 ## [Unreleased] — v2.0.0 (브랜치 `release/v2.0.0`)
 
+### 화면 버전 표시 (2026-11-12)
+
+- 추가: 상단 메뉴 오른쪽에 프론트엔드 버전과 빌드 커밋 표시(`v2.0.0-dev · abc1234`). 버전은 `package.json`, 커밋은 Vercel 빌드 커밋(로컬은 git)에서 빌드 시 주입. 좁은 화면에서는 숨김
+
 ### 보안 패치 — Next 메이저 업그레이드 (2026-11-12, 미배포)
 
 - 보안: Next 14.2.35→15.5.29, React 18→19, lucide-react 0.379→1.72. Next 14 계열에 남아 있던 critical(Image Optimization API RCE 등) 해소. 남은 high는 Next 내부 고정 postcss 1건(빌드 시 CSS 처리용)

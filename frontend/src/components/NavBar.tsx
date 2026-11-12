@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "@/components/AuthProvider";
 import LogoutButton from "@/components/LogoutButton";
+import { APP_VERSION, COMMIT_SHA, formatVersion } from "@/lib/version";
+
+const versionLabel = formatVersion(APP_VERSION, COMMIT_SHA);
 
 const ALL_TABS = [
   { href: "/stocks", label: "종목" },
@@ -32,6 +35,11 @@ export default function NavBar() {
           </Link>
         ))}
         <LogoutButton />
+        {versionLabel && (
+          <span className="hidden sm:inline text-xs text-gray-300 tabular-nums" title="프론트엔드 버전 · 빌드 커밋">
+            {versionLabel}
+          </span>
+        )}
       </div>
     </nav>
   );
